@@ -1,29 +1,108 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { TrendingUp, Star, Clock, ChevronRight } from "lucide-react";
+import { StockSearch } from "@/components/StockSearch";
+import { Card } from "@/components/ui/card";
+import { getRecent } from "@/lib/format";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Your App" },
-      { name: "description", content: "Replace this with a one-sentence description of your app." },
-      { property: "og:title", content: "Your App" },
-      { property: "og:description", content: "Replace this with a one-sentence description of your app." },
+      { title: "ValueScope — Análise de Valor Intrínseco" },
+      {
+        name: "description",
+        content:
+          "Pesquise qualquer ação e veja imediatamente o seu valor intrínseco calculado por DCF.",
+      },
     ],
   }),
-  component: Index,
+  component: Home,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
+type Watch = { ticker: string; company_name: string | null };
+
+function Home() {
+  const { user } = useAuth();
+  const [recent, setRecent] = useState<{ ticker: string; name: string }[]>([]);
+  const [watchlist, setWatchlist] = useState<Watch[]>([]);
+
+  useEffect(() => {
+    setRecent(getRecent());
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setWatchlist([]);
+      return;
+    }
+    supabase
+      .from("watchlist")
+      .select("ticker, company_name")
+      .order("added_at", { ascending: false })
+      .limit(6)
+      .then(({ data }) => setWatchlist(data ?? []));
+  }, [user]);
+
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
+    <div className="mx-auto max-w-3xl px-4 pb-20 pt-10 sm:pt-16">
+      <div className="text-center">
+        <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
+          <TrendingUp className="h-3 w-3 text-primary" /> Valor intrínseco por DCF
+        </div>
+        <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-5xl">
+          Saiba quanto vale <span className="text-primary">realmente</span> uma ação
+        </h1>
+        <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
+          Pesquise qualquer ação e veja imediatamente dois cálculos de valor intrínseco,
+          totalmente personalizáveis.
+        </p>
+      </div>
+
+      <div className="mt-8">
+        <StockSearch autoFocus />
+      </div>
+
+      {watchlist.length > 0 && (
+        <section className="mt-12">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <Star className="h-4 w-4 text-primary" /> Watchlist
+          </h2>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {watchlist.map((w) => (
+              <TickerCard key={w.ticker} ticker={w.ticker} name={w.company_name ?? ""} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recent.length > 0 && (
+        <section className="mt-10">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <Clock className="h-4 w-4" /> Vistos recentemente
+          </h2>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {recent.map((r) => (
+              <TickerCard key={r.ticker} ticker={r.ticker} name={r.name} />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
+  );
+}
+
+function TickerCard({ ticker, name }: { ticker: string; name: string }) {
+  return (
+    <Link to="/stock/$ticker" params={{ ticker }}>
+      <Card className="flex items-center justify-between gap-3 p-4 transition-colors hover:border-primary/60 hover:bg-accent/40">
+        <div className="min-w-0">
+          <div className="font-semibold">{ticker}</div>
+          <div className="truncate text-sm text-muted-foreground">{name}</div>
+        </div>
+        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+      </Card>
+    </Link>
   );
 }
