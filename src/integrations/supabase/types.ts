@@ -14,7 +14,72 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      moat_cache: {
+        Row: {
+          analysis_json: Json
+          generated_at: string
+          id: string
+          ticker: string
+        }
+        Insert: {
+          analysis_json: Json
+          generated_at?: string
+          id?: string
+          ticker: string
+        }
+        Update: {
+          analysis_json?: Json
+          generated_at?: string
+          id?: string
+          ticker?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          id: string
+          plan: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          id: string
+          plan?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          plan?: string
+        }
+        Relationships: []
+      }
+      watchlist: {
+        Row: {
+          added_at: string
+          company_name: string | null
+          id: string
+          ticker: string
+          user_id: string
+        }
+        Insert: {
+          added_at?: string
+          company_name?: string | null
+          id?: string
+          ticker: string
+          user_id: string
+        }
+        Update: {
+          added_at?: string
+          company_name?: string | null
+          id?: string
+          ticker?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
