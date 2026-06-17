@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 const BASE = "https://financialmodelingprep.com/api/v3";
+const STABLE = "https://financialmodelingprep.com/stable";
 
 function key() {
   const k = process.env.FMP_API_KEY ?? process.env.VITE_FMP_API_KEY;
@@ -10,23 +11,41 @@ function key() {
   return k;
 }
 
-async function fmp<T = unknown>(path: string): Promise<T> {
-  const sep = path.includes("?") ? "&" : "?";
-  const url = `${BASE}${path}${sep}apikey=${key()}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`FMP ${res.status}: ${path}`);
+async function fmpUrl<T = unknown>(url: string, label: string): Promise<T> {
+  const sep = url.includes("?") ? "&" : "?";
+  const res = await fetch(`${url}${sep}apikey=${key()}`);
+  if (res.status === 403) {
+    throw new Error(
+      `Acesso negado pela FMP (403) em ${label}. A chave pode ser inválida ou o seu plano FMP não inclui este endpoint.`,
+    );
+  }
+  if (res.status === 401) throw new Error("Chave FMP inválida (401).");
+  if (!res.ok) throw new Error(`FMP ${res.status}: ${label}`);
   return (await res.json()) as T;
+}
+
+async function fmp<T = unknown>(path: string): Promise<T> {
+  return fmpUrl<T>(`${BASE}${path}`, path);
 }
 
 export const searchStocks = createServerFn({ method: "GET" })
   .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
-    type R = { symbol: string; name: string; exchangeShortName?: string; currency?: string }[];
-    const out = await fmp<R>(`/search?query=${encodeURIComponent(data.query)}&limit=10`);
+    type R = { symbol: string; name: string; exchangeShortName?: string; exchange?: string; currency?: string }[];
+    // Try the stable endpoint first (current FMP plans); fall back to v3.
+    let out: R = [];
+    try {
+      out = await fmpUrl<R>(
+        `${STABLE}/search-symbol?query=${encodeURIComponent(data.query)}&limit=10`,
+        "search-symbol",
+      );
+    } catch {
+      out = await fmp<R>(`/search?query=${encodeURIComponent(data.query)}&limit=10`);
+    }
     return out.map((r) => ({
       ticker: r.symbol,
       name: r.name,
-      exchange: r.exchangeShortName ?? "",
+      exchange: r.exchangeShortName ?? r.exchange ?? "",
       currency: r.currency ?? "USD",
     }));
   });
