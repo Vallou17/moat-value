@@ -75,13 +75,13 @@ export const getStockData = createServerFn({ method: "GET" })
 
     const [quoteArr, profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
       await Promise.all([
-        fmp<any[]>(`/quote/${t}`),
-        fmp<any[]>(`/profile/${t}`),
-        fmp<any[]>(`/income-statement/${t}?limit=5`),
-        fmp<any[]>(`/cash-flow-statement/${t}?limit=5`),
-        fmp<any[]>(`/balance-sheet-statement/${t}?limit=1`),
-        fmp<any[]>(`/key-metrics/${t}?limit=1`).catch(() => []),
-        fmp<any[]>(`/analyst-estimates/${t}`).catch(() => []),
+        fmp<any[]>(`/quote`, { symbol: t }),
+        fmp<any[]>(`/profile`, { symbol: t }),
+        fmp<any[]>(`/income-statement`, { symbol: t, limit: 5 }),
+        fmp<any[]>(`/cash-flow-statement`, { symbol: t, limit: 5 }),
+        fmp<any[]>(`/balance-sheet-statement`, { symbol: t, limit: 1 }),
+        fmp<any[]>(`/key-metrics`, { symbol: t, limit: 1 }).catch(() => []),
+        fmp<any[]>(`/analyst-estimates`, { symbol: t }).catch(() => []),
       ]);
 
     if (!quoteArr?.length) throw new Error("Ticker não encontrado");
