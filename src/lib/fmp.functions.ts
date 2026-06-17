@@ -2,7 +2,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const BASE = "https://financialmodelingprep.com/api/v3";
 const STABLE = "https://financialmodelingprep.com/stable";
 
 function key() {
@@ -24,24 +23,16 @@ async function fmpUrl<T = unknown>(url: string, label: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function fmp<T = unknown>(path: string): Promise<T> {
-  return fmpUrl<T>(`${BASE}${path}`, path);
+async function fmp<T = unknown>(path: string, query: Record<string, string | number> = {}): Promise<T> {
+  const qs = new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString();
+  return fmpUrl<T>(`${STABLE}${path}${qs ? `?${qs}` : ""}`, path);
 }
 
 export const searchStocks = createServerFn({ method: "GET" })
   .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
     type R = { symbol: string; name: string; exchangeShortName?: string; exchange?: string; currency?: string }[];
-    // Try the stable endpoint first (current FMP plans); fall back to v3.
-    let out: R = [];
-    try {
-      out = await fmpUrl<R>(
-        `${STABLE}/search-symbol?query=${encodeURIComponent(data.query)}&limit=10`,
-        "search-symbol",
-      );
-    } catch {
-      out = await fmp<R>(`/search?query=${encodeURIComponent(data.query)}&limit=10`);
-    }
+    const out = await fmp<R>(`/search-symbol`, { query: data.query, limit: 10 });
     return out.map((r) => ({
       ticker: r.symbol,
       name: r.name,
@@ -84,13 +75,13 @@ export const getStockData = createServerFn({ method: "GET" })
 
     const [quoteArr, profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
       await Promise.all([
-        fmp<any[]>(`/quote/${t}`),
-        fmp<any[]>(`/profile/${t}`),
-        fmp<any[]>(`/income-statement/${t}?limit=5`),
-        fmp<any[]>(`/cash-flow-statement/${t}?limit=5`),
-        fmp<any[]>(`/balance-sheet-statement/${t}?limit=1`),
-        fmp<any[]>(`/key-metrics/${t}?limit=1`).catch(() => []),
-        fmp<any[]>(`/analyst-estimates/${t}`).catch(() => []),
+        fmp<any[]>(`/quote`, { symbol: t }),
+        fmp<any[]>(`/profile`, { symbol: t }),
+        fmp<any[]>(`/income-statement`, { symbol: t, limit: 5 }),
+        fmp<any[]>(`/cash-flow-statement`, { symbol: t, limit: 5 }),
+        fmp<any[]>(`/balance-sheet-statement`, { symbol: t, limit: 1 }),
+        fmp<any[]>(`/key-metrics`, { symbol: t, limit: 1 }).catch(() => []),
+        fmp<any[]>(`/analyst-estimates`, { symbol: t }).catch(() => []),
       ]);
 
     if (!quoteArr?.length) throw new Error("Ticker não encontrado");
