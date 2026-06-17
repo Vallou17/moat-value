@@ -171,10 +171,10 @@ export const getStockData = createServerFn({ method: "GET" })
     return {
       ticker: t,
       companyName: profile.companyName ?? quote.name ?? t,
-      exchange: profile.exchangeShortName ?? quote.exchange ?? "",
+      exchange: profile.exchange ?? profile.exchangeShortName ?? quote.exchange ?? "",
       currency: profile.currency ?? "USD",
-      price: Number(quote.price ?? 0),
-      changePercent: Number(quote.changesPercentage ?? 0),
+      price: priceNow,
+      changePercent: Number(quote.changePercentage ?? quote.changesPercentage ?? profile.changePercentage ?? 0),
       freeCashFlow,
       operatingCashFlow,
       capex,
