@@ -2,41 +2,35 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-const STABLE = "https://financialmodelingprep.com/stable";
+const BASE = "https://financialmodelingprep.com/stable";
 
 function key() {
   const k = process.env.FMP_API_KEY ?? process.env.VITE_FMP_API_KEY;
-  if (!k) throw new Error("Chave da API FMP não configurada — adicione FMP_API_KEY nas definições do projeto");
+  if (!k) throw new Error("Chave FMP_API_KEY não configurada");
   return k;
 }
 
-async function fmpUrl<T = unknown>(url: string, label: string): Promise<T> {
-  const sep = url.includes("?") ? "&" : "?";
-  const res = await fetch(`${url}${sep}apikey=${key()}`);
-  if (res.status === 403) {
-    throw new Error(
-      `Acesso negado pela FMP (403) em ${label}. A chave pode ser inválida ou o seu plano FMP não inclui este endpoint.`,
-    );
+async function fmp<T = unknown>(path: string): Promise<T> {
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${BASE}${path}${sep}apikey=${key()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`FMP ${res.status}: ${path}`);
+  const json = await res.json();
+  if (json && typeof json === "object" && !Array.isArray(json) && "Error Message" in json) {
+    throw new Error(`FMP: ${(json as any)["Error Message"]}`);
   }
-  if (res.status === 401) throw new Error("Chave FMP inválida (401).");
-  if (!res.ok) throw new Error(`FMP ${res.status}: ${label}`);
-  return (await res.json()) as T;
-}
-
-async function fmp<T = unknown>(path: string, query: Record<string, string | number> = {}): Promise<T> {
-  const qs = new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString();
-  return fmpUrl<T>(`${STABLE}${path}${qs ? `?${qs}` : ""}`, path);
+  return json as T;
 }
 
 export const searchStocks = createServerFn({ method: "GET" })
   .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
-    type R = { symbol: string; name: string; exchangeShortName?: string; exchange?: string; currency?: string }[];
-    const out = await fmp<R>(`/search-symbol`, { query: data.query, limit: 10 });
+    type R = { symbol: string; name: string; exchangeShortName?: string; currency?: string }[];
+    const out = await fmp<R>(`/search-name?query=${encodeURIComponent(data.query)}&limit=10`);
     return out.map((r) => ({
       ticker: r.symbol,
       name: r.name,
-      exchange: r.exchangeShortName ?? r.exchange ?? "",
+      exchange: r.exchangeShortName ?? "",
       currency: r.currency ?? "USD",
     }));
   });
@@ -75,13 +69,13 @@ export const getStockData = createServerFn({ method: "GET" })
 
     const [quoteArr, profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
       await Promise.all([
-        fmp<any[]>(`/quote`, { symbol: t }),
-        fmp<any[]>(`/profile`, { symbol: t }),
-        fmp<any[]>(`/income-statement`, { symbol: t, limit: 5 }),
-        fmp<any[]>(`/cash-flow-statement`, { symbol: t, limit: 5 }),
-        fmp<any[]>(`/balance-sheet-statement`, { symbol: t, limit: 1 }),
-        fmp<any[]>(`/key-metrics`, { symbol: t, limit: 1 }).catch(() => []),
-        fmp<any[]>(`/analyst-estimates`, { symbol: t }).catch(() => []),
+        fmp<any[]>(`/quote?symbol=${t}`),
+        fmp<any[]>(`/profile?symbol=${t}`),
+        fmp<any[]>(`/income-statement?symbol=${t}&limit=5`),
+        fmp<any[]>(`/cash-flow-statement?symbol=${t}&limit=5`),
+        fmp<any[]>(`/balance-sheet-statement?symbol=${t}&limit=1`),
+        fmp<any[]>(`/key-metrics?symbol=${t}&limit=1`).catch(() => []),
+        fmp<any[]>(`/analyst-estimates?symbol=${t}&period=annual`).catch(() => []),
       ]);
 
     if (!quoteArr?.length) throw new Error("Ticker não encontrado");
@@ -117,19 +111,21 @@ export const getStockData = createServerFn({ method: "GET" })
 
     // Growth rate from analyst estimates: avg of next ~5y revenue growth
     let baseGrowthRate = 0;
+    const revEst = (e: any) =>
+      Number(e.revenueAvg ?? e.estimatedRevenueAvg ?? e.revenueHigh ?? 0);
     if (Array.isArray(estimatesArr) && estimatesArr.length) {
       const currentYear = new Date().getFullYear();
       const future = estimatesArr
         .filter((e) => {
           const y = Number(String(e.date ?? "").slice(0, 4));
-          return y >= currentYear && y <= currentYear + 5 && e.estimatedRevenueAvg;
+          return y >= currentYear && y <= currentYear + 5 && revEst(e) > 0;
         })
         .sort((a, b) => String(a.date).localeCompare(String(b.date)));
       if (future.length >= 2) {
         const rates: number[] = [];
         for (let i = 1; i < future.length; i++) {
-          const prev = Number(future[i - 1].estimatedRevenueAvg);
-          const curr = Number(future[i].estimatedRevenueAvg);
+          const prev = revEst(future[i - 1]);
+          const curr = revEst(future[i]);
           if (prev > 0 && curr > 0) rates.push(curr / prev - 1);
         }
         if (rates.length) baseGrowthRate = rates.reduce((a, b) => a + b, 0) / rates.length;
