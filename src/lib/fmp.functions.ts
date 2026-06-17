@@ -102,10 +102,12 @@ export const getStockData = createServerFn({ method: "GET" })
       balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
     );
 
+    const mktCap = Number(profile.marketCap ?? profile.mktCap ?? quote.marketCap ?? 0);
+    const priceNow = Number(quote.price ?? profile.price ?? 0);
     const sharesOutstanding =
       Number(quote.sharesOutstanding) ||
       Number(keyMetricsArr?.[0]?.sharesOutstanding) ||
-      Number(profile.mktCap && quote.price ? profile.mktCap / quote.price : 0);
+      (mktCap > 0 && priceNow > 0 ? mktCap / priceNow : 0);
 
     if (!sharesOutstanding) throw new Error("Número de ações indisponível");
 
