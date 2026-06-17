@@ -102,10 +102,12 @@ export const getStockData = createServerFn({ method: "GET" })
       balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
     );
 
+    const mktCap = Number(profile.marketCap ?? profile.mktCap ?? quote.marketCap ?? 0);
+    const priceNow = Number(quote.price ?? profile.price ?? 0);
     const sharesOutstanding =
       Number(quote.sharesOutstanding) ||
       Number(keyMetricsArr?.[0]?.sharesOutstanding) ||
-      Number(profile.mktCap && quote.price ? profile.mktCap / quote.price : 0);
+      (mktCap > 0 && priceNow > 0 ? mktCap / priceNow : 0);
 
     if (!sharesOutstanding) throw new Error("Número de ações indisponível");
 
@@ -169,10 +171,10 @@ export const getStockData = createServerFn({ method: "GET" })
     return {
       ticker: t,
       companyName: profile.companyName ?? quote.name ?? t,
-      exchange: profile.exchangeShortName ?? quote.exchange ?? "",
+      exchange: profile.exchange ?? profile.exchangeShortName ?? quote.exchange ?? "",
       currency: profile.currency ?? "USD",
-      price: Number(quote.price ?? 0),
-      changePercent: Number(quote.changesPercentage ?? 0),
+      price: priceNow,
+      changePercent: Number(quote.changePercentage ?? quote.changesPercentage ?? profile.changePercentage ?? 0),
       freeCashFlow,
       operatingCashFlow,
       capex,
