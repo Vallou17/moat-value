@@ -55,11 +55,17 @@ function StockPage() {
   if (isLoading) return <StockSkeleton />;
 
   if (error || !data) {
+    const errMessage = (error as Error | undefined)?.message ?? "";
+    const isApiKeyMissing = errMessage.toLowerCase().includes("não configurada") || errMessage.toLowerCase().includes("fmp_api_key");
     return (
       <div className="mx-auto max-w-xl px-4 py-16 text-center">
-        <h1 className="text-xl font-semibold">Não foi possível carregar {ticker}</h1>
+        <h1 className="text-xl font-semibold">
+          {isApiKeyMissing ? "Erro de configuração" : `Não foi possível carregar ${ticker}`}
+        </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          {(error as Error | undefined)?.message ?? "Ticker não encontrado ou API indisponível."}
+          {isApiKeyMissing
+            ? "Chave da API FMP não configurada — adicione FMP_API_KEY nas definições do projeto."
+            : errMessage || "Ticker não encontrado ou API indisponível."}
         </p>
         <Button className="mt-6" variant="secondary" onClick={() => navigate({ to: "/" })}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Voltar

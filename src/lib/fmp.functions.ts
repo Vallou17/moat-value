@@ -5,8 +5,8 @@ import { z } from "zod";
 const BASE = "https://financialmodelingprep.com/api/v3";
 
 function key() {
-  const k = process.env.FMP_API_KEY;
-  if (!k) throw new Error("FMP_API_KEY não configurada");
+  const k = process.env.FMP_API_KEY ?? process.env.VITE_FMP_API_KEY;
+  if (!k) throw new Error("Chave da API FMP não configurada — adicione FMP_API_KEY nas definições do projeto");
   return k;
 }
 
