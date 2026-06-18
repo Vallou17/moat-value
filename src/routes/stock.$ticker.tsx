@@ -79,18 +79,17 @@ function StockPage() {
 
 function StockView({ data }: { data: StockData }) {
   const navigate = useNavigate();
-  const currentYear = new Date().getFullYear();
   const { user } = useAuth();
   const [inWatch, setInWatch] = useState(false);
   const [savingWatch, setSavingWatch] = useState(false);
 
   // Defaults
-  const defaults = useMemo(
+const defaults = useMemo(
     () => ({
       discountRate: 5,
-      g1to5: +(data.baseGrowthRate * 100).toFixed(2),
-      g6to10: +((data.baseGrowthRate * 100) / 2).toFixed(2),
-      g11to20: +((data.baseGrowthRate * 100) / 4).toFixed(2),
+      g1to5: Math.round(data.baseGrowthRate * 100),
+      g6to10: Math.round((data.baseGrowthRate * 100) / 2),
+      g11to20: Math.round((data.baseGrowthRate * 100) / 4),
     }),
     [data.baseGrowthRate],
   );
@@ -243,15 +242,9 @@ function StockView({ data }: { data: StockData }) {
       )}
 
       {/* Intrinsic value */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+      <div className="mt-6 grid gap-4 sm:grid-cols-1">
         <IvCard
-          label="Valor Intrínseco (DCF)"
-          iv={ivStandard.intrinsicValuePerShare}
-          price={data.price}
-          currency={data.currency}
-        />
-        <IvCard
-          label="Valor Intrínseco Ajustado (CAPEX Médio 4A)"
+          label="Valor Intrínseco"
           iv={ivAdjusted.intrinsicValuePerShare}
           price={data.price}
           currency={data.currency}
@@ -276,12 +269,6 @@ function StockView({ data }: { data: StockData }) {
               <Field label="Crescimento FCF Anos 1–5 (%)" value={g1} step={0.1} onChange={setG1} />
               <Field label="Crescimento FCF Anos 6–10 (%)" value={g2} step={0.1} onChange={setG2} />
               <Field label="Crescimento FCF Anos 11–20 (%)" value={g3} step={0.1} onChange={setG3} />
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs text-muted-foreground">Ano Atual</Label>
-                <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm">
-                  {currentYear}
-                </div>
-              </div>
             </div>
             <Button variant="ghost" size="sm" className="mt-4" onClick={reset}>
               <RotateCcw className="mr-2 h-3.5 w-3.5" /> Repor valores originais
