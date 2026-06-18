@@ -1,4 +1,4 @@
-// Cache-bust: 2026-06-18
+// Cache-bust: 2026-06-18b
 // FMP API proxy — keeps the API key server-side.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -7,7 +7,7 @@ const BASE = "https://financialmodelingprep.com/stable";
 
 function key() {
   const k = process.env.FMP_API_KEY ?? process.env.VITE_FMP_API_KEY;
-  if (!k) throw new Error("Chave FMP_API_KEY não configurada");
+  if (!k) throw new Error("Chave FMP_API_KEY não configurada no servidor.");
   return k;
 }
 
@@ -15,7 +15,10 @@ async function fmp<T = unknown>(path: string): Promise<T> {
   const sep = path.includes("?") ? "&" : "?";
   const url = `${BASE}${path}${sep}apikey=${key()}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`FMP ${res.status}: ${path}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`FMP ${res.status} em ${path.split("?")[0]}${body ? `: ${body.slice(0, 120)}` : ""}`);
+  }
   const json = await res.json();
   if (json && typeof json === "object" && !Array.isArray(json) && "Error Message" in json) {
     throw new Error(`FMP: ${(json as any)["Error Message"]}`);
@@ -26,14 +29,33 @@ async function fmp<T = unknown>(path: string): Promise<T> {
 export const searchStocks = createServerFn({ method: "GET" })
   .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
-    type R = { symbol: string; name: string; exchangeShortName?: string; currency?: string }[];
-    const out = await fmp<R>(`/search-name?query=${encodeURIComponent(data.query)}&limit=10`);
-    return out.map((r) => ({
-      ticker: r.symbol,
-      name: r.name,
-      exchange: r.exchangeShortName ?? "",
-      currency: r.currency ?? "USD",
-    }));
+    type R = { symbol: string; name: string; exchangeShortName?: string; exchange?: string; currency?: string }[];
+    const q = data.query.trim();
+    const qU = q.toUpperCase();
+    const [bySymbol, byName] = await Promise.all([
+      fmp<R>(`/search-symbol?query=${encodeURIComponent(q)}&limit=10`).catch(() => [] as R),
+      fmp<R>(`/search-name?query=${encodeURIComponent(q)}&limit=10`).catch(() => [] as R),
+    ]);
+    const seen = new Set<string>();
+    const merged = [...bySymbol, ...byName]
+      .filter((r) => {
+        if (!r?.symbol) return false;
+        if (seen.has(r.symbol)) return false;
+        seen.add(r.symbol);
+        return true;
+      })
+      .map((r) => ({
+        ticker: r.symbol,
+        name: r.name,
+        exchange: r.exchangeShortName ?? r.exchange ?? "",
+        currency: r.currency ?? "USD",
+      }));
+    merged.sort((a, b) => {
+      const ax = a.ticker.toUpperCase() === qU ? 0 : 1;
+      const bx = b.ticker.toUpperCase() === qU ? 0 : 1;
+      return ax - bx;
+    });
+    return merged.slice(0, 10);
   });
 
 export type StockData = {
