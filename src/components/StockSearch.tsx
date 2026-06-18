@@ -11,6 +11,7 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -26,6 +27,7 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
     const q = query.trim();
     if (q.length < 1) {
       setResults([]);
+      setError(null);
       return;
     }
     setLoading(true);
@@ -33,9 +35,13 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
       try {
         const r = await searchStocks({ data: { query: q } });
         setResults(r);
+        setError(r.length === 0 ? "Sem resultados para esta pesquisa." : null);
         setOpen(true);
-      } catch {
+      } catch (e) {
         setResults([]);
+        const msg = e instanceof Error ? e.message : "Erro desconhecido";
+        setError(`Falha na pesquisa: ${msg}`);
+        setOpen(true);
       } finally {
         setLoading(false);
       }
@@ -68,25 +74,32 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
           <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
         )}
       </div>
-      {open && results.length > 0 && (
+      {open && (results.length > 0 || error) && (
         <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-lg border border-border bg-popover shadow-xl">
-          <ul className="max-h-80 divide-y divide-border/60 overflow-y-auto">
-            {results.map((r) => (
-              <li key={r.ticker + r.exchange}>
-                <button
-                  type="button"
-                  onClick={() => go(r.ticker)}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-accent"
-                >
-                  <div>
-                    <div className="font-medium">{r.ticker}</div>
-                    <div className="text-sm text-muted-foreground">{r.name}</div>
-                  </div>
-                  <span className="text-xs text-muted-foreground">{r.exchange}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          {error && (
+            <div className="border-b border-border/60 px-4 py-3 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+          {results.length > 0 && (
+            <ul className="max-h-80 divide-y divide-border/60 overflow-y-auto">
+              {results.map((r) => (
+                <li key={r.ticker + r.exchange}>
+                  <button
+                    type="button"
+                    onClick={() => go(r.ticker)}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-accent"
+                  >
+                    <div>
+                      <div className="font-medium">{r.ticker}</div>
+                      <div className="text-sm text-muted-foreground">{r.name}</div>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{r.exchange}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
