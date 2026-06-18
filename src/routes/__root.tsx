@@ -56,6 +56,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content:
           "Calcule o valor intrínseco de ações através de DCF com pressupostos personalizáveis.",
       },
+      { property: "og:title", content: "ValueScope — Análise de Valor Intrínseco" },
+      { name: "twitter:title", content: "ValueScope — Análise de Valor Intrínseco" },
+      { name: "description", content: "Moat Value é uma aplicação web que calcula o valor intrínseco de ações e analisa o seu fosso económico." },
+      { property: "og:description", content: "Moat Value é uma aplicação web que calcula o valor intrínseco de ações e analisa o seu fosso económico." },
+      { name: "twitter:description", content: "Moat Value é uma aplicação web que calcula o valor intrínseco de ações e analisa o seu fosso económico." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/114a1825-0ade-403a-af84-2dcc9d52f085/id-preview-7197c11a--b0543cfd-be4d-462a-9b11-952af8864cc7.lovable.app-1781779942275.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/114a1825-0ade-403a-af84-2dcc9d52f085/id-preview-7197c11a--b0543cfd-be4d-462a-9b11-952af8864cc7.lovable.app-1781779942275.png" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { property: "og:type", content: "website" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
