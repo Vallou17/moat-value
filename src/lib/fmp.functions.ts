@@ -25,14 +25,40 @@ async function fmp<T = unknown>(path: string): Promise<T> {
 export const searchStocks = createServerFn({ method: "GET" })
   .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
-    type R = { symbol: string; name: string; exchangeShortName?: string; currency?: string }[];
-    const out = await fmp<R>(`/search-name?query=${encodeURIComponent(data.query)}&limit=10`);
-    return out.map((r) => ({
-      ticker: r.symbol,
-      name: r.name,
-      exchange: r.exchangeShortName ?? "",
-      currency: r.currency ?? "USD",
-    }));
+    type R = {
+      symbol: string;
+      name: string;
+      exchange?: string;
+      exchangeShortName?: string;
+      currency?: string;
+    }[];
+    const query = data.query.trim();
+    const encoded = encodeURIComponent(query);
+    const [symbolMatches, nameMatches] = await Promise.all([
+      fmp<R>(`/search-symbol?query=${encoded}&limit=10`).catch(() => []),
+      fmp<R>(`/search-name?query=${encoded}&limit=10`).catch(() => []),
+    ]);
+
+    const seen = new Set<string>();
+    return [...symbolMatches, ...nameMatches]
+      .filter((r) => {
+        if (!r.symbol || seen.has(r.symbol)) return false;
+        seen.add(r.symbol);
+        return true;
+      })
+      .sort((a, b) => {
+        const qa = query.toUpperCase();
+        const aExact = a.symbol.toUpperCase() === qa ? 0 : 1;
+        const bExact = b.symbol.toUpperCase() === qa ? 0 : 1;
+        return aExact - bExact;
+      })
+      .slice(0, 10)
+      .map((r) => ({
+        ticker: r.symbol,
+        name: r.name,
+        exchange: r.exchangeShortName ?? r.exchange ?? "",
+        currency: r.currency ?? "USD",
+      }));
   });
 
 export type StockData = {
