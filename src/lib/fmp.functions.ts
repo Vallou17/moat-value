@@ -25,40 +25,14 @@ async function fmp<T = unknown>(path: string): Promise<T> {
 export const searchStocks = createServerFn({ method: "GET" })
   .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
-    type R = {
-      symbol: string;
-      name: string;
-      exchange?: string;
-      exchangeShortName?: string;
-      currency?: string;
-    }[];
-    const query = data.query.trim();
-    const encoded = encodeURIComponent(query);
-    const [symbolMatches, nameMatches] = await Promise.all([
-      fmp<R>(`/search-symbol?query=${encoded}&limit=10`).catch(() => []),
-      fmp<R>(`/search-name?query=${encoded}&limit=10`).catch(() => []),
-    ]);
-
-    const seen = new Set<string>();
-    return [...symbolMatches, ...nameMatches]
-      .filter((r) => {
-        if (!r.symbol || seen.has(r.symbol)) return false;
-        seen.add(r.symbol);
-        return true;
-      })
-      .sort((a, b) => {
-        const qa = query.toUpperCase();
-        const aExact = a.symbol.toUpperCase() === qa ? 0 : 1;
-        const bExact = b.symbol.toUpperCase() === qa ? 0 : 1;
-        return aExact - bExact;
-      })
-      .slice(0, 10)
-      .map((r) => ({
-        ticker: r.symbol,
-        name: r.name,
-        exchange: r.exchangeShortName ?? r.exchange ?? "",
-        currency: r.currency ?? "USD",
-      }));
+    type R = { symbol: string; name: string; exchangeShortName?: string; currency?: string }[];
+    const out = await fmp<R>(`/search-name?query=${encodeURIComponent(data.query)}&limit=10`);
+    return out.map((r) => ({
+      ticker: r.symbol,
+      name: r.name,
+      exchange: r.exchangeShortName ?? "",
+      currency: r.currency ?? "USD",
+    }));
   });
 
 export type StockData = {
@@ -68,7 +42,6 @@ export type StockData = {
   currency: string;
   price: number;
   changePercent: number;
-  // financials
   freeCashFlow: number;
   operatingCashFlow: number;
   capex: number;
@@ -79,8 +52,7 @@ export type StockData = {
   sharesOutstanding: number;
   peRatio: number | null;
   roic: number | null;
-  baseGrowthRate: number; // decimal (0.10 = 10%)
-  // historicals (oldest -> newest, last 5)
+  baseGrowthRate: number;
   history: { year: number; revenue: number; fcf: number }[];
   warnings: string[];
 };
@@ -122,22 +94,20 @@ export const getStockData = createServerFn({ method: "GET" })
     const fcfAdjusted = operatingCashFlow - meanCapex4y;
 
     const totalDebt =
-      Number(balance0.shortTermDebt ?? 0) + Number(balance0.longTermDebt ?? 0) ||
-      Number(balance0.totalDebt ?? 0);
+      Number(balance0.totalDebt ?? 0) ||
+      Number(balance0.shortTermDebt ?? 0) + Number(balance0.longTermDebt ?? 0);
     const cashBs = Number(
       balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
     );
 
-    const mktCap = Number(profile.marketCap ?? profile.mktCap ?? quote.marketCap ?? 0);
-    const priceNow = Number(quote.price ?? profile.price ?? 0);
     const sharesOutstanding =
-      Number(quote.sharesOutstanding) ||
+      Number(quote.marketCap && quote.price ? quote.marketCap / quote.price : 0) ||
+      Number(profile.mktCap && quote.price ? profile.mktCap / quote.price : 0) ||
       Number(keyMetricsArr?.[0]?.sharesOutstanding) ||
-      (mktCap > 0 && priceNow > 0 ? mktCap / priceNow : 0);
+      Number(quote.sharesOutstanding);
 
     if (!sharesOutstanding) throw new Error("Número de ações indisponível");
 
-    // Growth rate from analyst estimates: avg of next ~5y revenue growth
     let baseGrowthRate = 0;
     const revEst = (e: any) =>
       Number(e.revenueAvg ?? e.estimatedRevenueAvg ?? e.revenueHigh ?? 0);
@@ -160,7 +130,6 @@ export const getStockData = createServerFn({ method: "GET" })
       }
     }
     if (!baseGrowthRate || !isFinite(baseGrowthRate)) {
-      // fallback: historical revenue CAGR from income statements
       if (incomeArr.length >= 2) {
         const oldest = Number(incomeArr[incomeArr.length - 1].revenue);
         const newest = Number(incomeArr[0].revenue);
@@ -173,17 +142,15 @@ export const getStockData = createServerFn({ method: "GET" })
       baseGrowthRate = 0;
       warnings.push("Estimativas de crescimento indisponíveis — defina manualmente.");
     }
-    // sanity cap
     baseGrowthRate = Math.max(-0.2, Math.min(0.4, baseGrowthRate));
 
     if (freeCashFlow < 0)
       warnings.push("FCF negativo — o cálculo pode não ser fiável.");
 
-    // history (oldest -> newest)
     const history = incomeArr
       .slice()
       .reverse()
-      .map((inc, i) => {
+      .map((inc) => {
         const year = Number(String(inc.date ?? "").slice(0, 4)) || 0;
         const matchingCash = cashArr.find((c) => String(c.date).slice(0, 4) === String(year));
         return {
@@ -197,10 +164,10 @@ export const getStockData = createServerFn({ method: "GET" })
     return {
       ticker: t,
       companyName: profile.companyName ?? quote.name ?? t,
-      exchange: profile.exchange ?? profile.exchangeShortName ?? quote.exchange ?? "",
+      exchange: profile.exchangeShortName ?? quote.exchange ?? "",
       currency: profile.currency ?? "USD",
-      price: priceNow,
-      changePercent: Number(quote.changePercentage ?? quote.changesPercentage ?? profile.changePercentage ?? 0),
+      price: Number(quote.price ?? 0),
+      changePercent: Number(quote.changesPercentage ?? 0),
       freeCashFlow,
       operatingCashFlow,
       capex,
