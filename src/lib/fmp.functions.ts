@@ -141,7 +141,11 @@ const rawTotalDebt = balance0.totalDebt;
 
     if (!sharesOutstanding) throw new Error("Número de ações indisponível");
 
+   // Growth rate from analyst estimates: avg of next ~5y EPS growth
+    // (Finviz/Zacks/GF "5-year growth rate" is typically EPS-based, not revenue-based)
     let baseGrowthRate = 0;
+    const epsEst = (e: any) =>
+      Number(e.epsAvg ?? e.estimatedEpsAvg ?? 0);
     const revEst = (e: any) =>
       Number(e.revenueAvg ?? e.estimatedRevenueAvg ?? e.revenueHigh ?? 0);
     if (Array.isArray(estimatesArr) && estimatesArr.length) {
@@ -149,33 +153,33 @@ const rawTotalDebt = balance0.totalDebt;
       const future = estimatesArr
         .filter((e) => {
           const y = Number(String(e.date ?? "").slice(0, 4));
-          return y >= currentYear && y <= currentYear + 5 && revEst(e) > 0;
+          return y >= currentYear && y <= currentYear + 5;
         })
         .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-      if (future.length >= 2) {
+
+      const futureEps = future.filter((e) => epsEst(e) > 0);
+      if (futureEps.length >= 2) {
         const rates: number[] = [];
-        for (let i = 1; i < future.length; i++) {
-          const prev = revEst(future[i - 1]);
-          const curr = revEst(future[i]);
+        for (let i = 1; i < futureEps.length; i++) {
+          const prev = epsEst(futureEps[i - 1]);
+          const curr = epsEst(futureEps[i]);
           if (prev > 0 && curr > 0) rates.push(curr / prev - 1);
         }
         if (rates.length) baseGrowthRate = rates.reduce((a, b) => a + b, 0) / rates.length;
       }
-    }
-    if (!baseGrowthRate || !isFinite(baseGrowthRate)) {
-      if (incomeArr.length >= 2) {
-        const oldest = Number(incomeArr[incomeArr.length - 1].revenue);
-        const newest = Number(incomeArr[0].revenue);
-        const years = incomeArr.length - 1;
-        if (oldest > 0 && newest > 0)
-          baseGrowthRate = Math.pow(newest / oldest, 1 / years) - 1;
+      if (!baseGrowthRate || !isFinite(baseGrowthRate)) {
+        const futureRev = future.filter((e) => revEst(e) > 0);
+        if (futureRev.length >= 2) {
+          const rates: number[] = [];
+          for (let i = 1; i < futureRev.length; i++) {
+            const prev = revEst(futureRev[i - 1]);
+            const curr = revEst(futureRev[i]);
+            if (prev > 0 && curr > 0) rates.push(curr / prev - 1);
+          }
+          if (rates.length) baseGrowthRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+        }
       }
     }
-    if (!baseGrowthRate || !isFinite(baseGrowthRate)) {
-      baseGrowthRate = 0;
-      warnings.push("Estimativas de crescimento indisponíveis — defina manualmente.");
-    }
-    baseGrowthRate = Math.max(-0.2, Math.min(0.4, baseGrowthRate));
 
     if (freeCashFlow < 0)
       warnings.push("FCF negativo — o cálculo pode não ser fiável.");
