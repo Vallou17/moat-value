@@ -11,6 +11,7 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
   const [results, setResults] = useState<Result[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -26,6 +27,7 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
     const q = query.trim();
     if (q.length < 1) {
       setResults([]);
+      setError(null);
       return;
     }
     setLoading(true);
@@ -33,9 +35,13 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
       try {
         const r = await searchStocks({ data: { query: q } });
         setResults(r);
+        setError(r.length === 0 ? "Sem resultados para esta pesquisa." : null);
         setOpen(true);
-      } catch {
+      } catch (e) {
         setResults([]);
+        const msg = e instanceof Error ? e.message : "Erro desconhecido";
+        setError(`Falha na pesquisa: ${msg}`);
+        setOpen(true);
       } finally {
         setLoading(false);
       }
