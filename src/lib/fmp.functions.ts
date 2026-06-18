@@ -93,9 +93,19 @@ export const getStockData = createServerFn({ method: "GET" })
         : capex;
     const fcfAdjusted = operatingCashFlow - meanCapex4y;
 
+const rawTotalDebt = balance0.totalDebt;
     const totalDebt =
-      Number(balance0.totalDebt ?? 0) ||
-      Number(balance0.shortTermDebt ?? 0) + Number(balance0.longTermDebt ?? 0);
+      typeof rawTotalDebt === "number" && rawTotalDebt > 0
+        ? rawTotalDebt
+        : typeof rawTotalDebt === "string" && Number(rawTotalDebt) > 0
+          ? Number(rawTotalDebt)
+          : Number(balance0.shortTermDebt ?? 0) + Number(balance0.longTermDebt ?? 0);
+    console.log("[ValueScope DEBUG] totalDebt source:", {
+      rawTotalDebt,
+      shortTermDebt: balance0.shortTermDebt,
+      longTermDebt: balance0.longTermDebt,
+      finalTotalDebt: totalDebt,
+    });
     const cashBs = Number(
       balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
     );
