@@ -1,4 +1,4 @@
-// Cache-bust: 2026-06-18b
+// build-version: 2026-06-18-v2
 // FMP API proxy — keeps the API key server-side.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
