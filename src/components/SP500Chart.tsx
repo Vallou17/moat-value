@@ -8,13 +8,28 @@ import {
   Tooltip,
   Bar,
 } from "recharts";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, LineChart } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getMarketSnapshot, getIndexHistory, type Candle } from "@/lib/fmp.functions";
 
-type Range = "1D" | "1M" | "1A" | "3A" | "5A";
-const RANGES: Range[] = ["1D", "1M", "1A", "3A", "5A"];
+type Range = "1M" | "1A" | "3A" | "5A";
+const RANGES: Range[] = ["1M", "1A", "3A", "5A"];
+
+const MONTHS_PT = [
+  "Jan.", "Fev.", "Mar.", "Abr.", "Mai.", "Jun.",
+  "Jul.", "Ago.", "Set.", "Out.", "Nov.", "Dez.",
+];
+
+// "2026-06-15" -> for 1M: "Jun." | for 1A/3A/5A: "Jun. 26"
+function formatAxisDate(dateStr: string, range: Range): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const month = MONTHS_PT[d.getMonth()];
+  if (range === "1M") return month;
+  const yy = String(d.getFullYear()).slice(2);
+  return `${month} ${yy}`;
+}
 
 function fmtNum(n: number): string {
   return new Intl.NumberFormat("pt-PT", {
@@ -95,9 +110,7 @@ export function SP500Chart() {
 
   const history = useQuery({
     queryKey: ["index-history", "^GSPC", range],
-    queryFn: () =>
-      getIndexHistory({ data: { symbol: "^GSPC", range: range as "1M" | "1A" | "3A" | "5A" } }),
-    enabled: range !== "1D",
+    queryFn: () => getIndexHistory({ data: { symbol: "^GSPC", range } }),
     staleTime: 5 * 60_000,
   });
 
@@ -119,8 +132,8 @@ export function SP500Chart() {
     <Card className="flex h-full flex-col p-5">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            S&P 500
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+            <LineChart className="h-4 w-4 text-primary" /> Evolução do mercado
           </h2>
           {sp ? (
             <div className="mt-1 flex items-baseline gap-2">
@@ -139,22 +152,17 @@ export function SP500Chart() {
           )}
         </div>
         <div className="flex gap-1">
-          {RANGES.map((r) => {
-            const disabled = r === "1D";
-            return (
-              <Button
-                key={r}
-                variant={range === r ? "default" : "ghost"}
-                size="sm"
-                className="h-7 px-2 text-xs"
-                disabled={disabled}
-                title={disabled ? "Disponível em breve" : undefined}
-                onClick={() => !disabled && setRange(r)}
-              >
-                {r}
-              </Button>
-            );
-          })}
+          {RANGES.map((r) => (
+            <Button
+              key={r}
+              variant={range === r ? "default" : "ghost"}
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setRange(r)}
+            >
+              {r}
+            </Button>
+          ))}
         </div>
       </div>
 
@@ -171,7 +179,7 @@ export function SP500Chart() {
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-                tickFormatter={(d) => String(d).slice(5)}
+                tickFormatter={(d) => formatAxisDate(String(d), range)}
                 minTickGap={30}
               />
               <YAxis
