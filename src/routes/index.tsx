@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { TrendingUp, Star, Clock, ChevronRight, ArrowDown, ArrowUp } from "lucide-react";
+import { TrendingUp, Star, Clock, ChevronRight } from "lucide-react";
 import { StockSearch } from "@/components/StockSearch";
 import { MarketTicker } from "@/components/MarketTicker";
 import { SP500Chart } from "@/components/SP500Chart";
