@@ -52,7 +52,7 @@ function Home() {
     <>
       <MarketTicker />
 
-      <div className="mx-auto max-w-6xl px-4 pb-20">
+      <div className="mx-auto max-w-[1400px] px-6 pb-20 lg:px-10">
         {/* Hero */}
         <section className="mx-auto max-w-3xl pt-10 text-center sm:pt-16">
           <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
