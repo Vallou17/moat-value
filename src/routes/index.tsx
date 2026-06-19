@@ -125,5 +125,3 @@ function TickerCard({ ticker, name }: { ticker: string; name: string }) {
   );
 }
 
-// Re-export for downstream typecheck reference (unused icons trimmed)
-export { ArrowDown, ArrowUp };
