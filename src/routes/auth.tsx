@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import { Mail, Lock, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,16 +10,26 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+const searchSchema = z.object({
+  mode: z.enum(["login", "register"]).optional(),
+});
+
 export const Route = createFileRoute("/auth")({
+  validateSearch: searchSchema,
   component: AuthPage,
 });
 
 function AuthPage() {
   const navigate = useNavigate();
+  const { mode: initialMode } = Route.useSearch();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(initialMode ?? "login");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (initialMode) setMode(initialMode);
+  }, [initialMode]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -58,7 +69,11 @@ function AuthPage() {
         <h1 className="text-2xl font-bold tracking-tight">ValueScope</h1>
         <p className="text-sm text-muted-foreground">Entre ou crie uma conta gratuita.</p>
 
-        <Tabs value={mode} onValueChange={(v) => setMode(v as "login" | "register")} className="mt-5">
+        <Tabs
+          value={mode}
+          onValueChange={(v) => setMode(v as "login" | "register")}
+          className="mt-5"
+        >
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="login">Entrar</TabsTrigger>
             <TabsTrigger value="register">Criar conta</TabsTrigger>

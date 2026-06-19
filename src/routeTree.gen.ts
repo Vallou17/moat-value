@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AlertasRouteImport } from './routes/alertas'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StockTickerRouteImport } from './routes/stock.$ticker'
@@ -18,6 +19,11 @@ import { Route as AuthenticatedWatchlistRouteImport } from './routes/_authentica
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertasRoute = AlertasRouteImport.update({
+  id: '/alertas',
+  path: '/alertas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
@@ -42,12 +48,14 @@ const AuthenticatedWatchlistRoute = AuthenticatedWatchlistRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/alertas': typeof AlertasRoute
   '/auth': typeof AuthRoute
   '/watchlist': typeof AuthenticatedWatchlistRoute
   '/stock/$ticker': typeof StockTickerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/alertas': typeof AlertasRoute
   '/auth': typeof AuthRoute
   '/watchlist': typeof AuthenticatedWatchlistRoute
   '/stock/$ticker': typeof StockTickerRoute
@@ -56,19 +64,21 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/alertas': typeof AlertasRoute
   '/auth': typeof AuthRoute
   '/_authenticated/watchlist': typeof AuthenticatedWatchlistRoute
   '/stock/$ticker': typeof StockTickerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/watchlist' | '/stock/$ticker'
+  fullPaths: '/' | '/alertas' | '/auth' | '/watchlist' | '/stock/$ticker'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/watchlist' | '/stock/$ticker'
+  to: '/' | '/alertas' | '/auth' | '/watchlist' | '/stock/$ticker'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/alertas'
     | '/auth'
     | '/_authenticated/watchlist'
     | '/stock/$ticker'
@@ -77,6 +87,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  AlertasRoute: typeof AlertasRoute
   AuthRoute: typeof AuthRoute
   StockTickerRoute: typeof StockTickerRoute
 }
@@ -88,6 +99,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alertas': {
+      id: '/alertas'
+      path: '/alertas'
+      fullPath: '/alertas'
+      preLoaderRoute: typeof AlertasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -135,19 +153,10 @@ const AuthenticatedRouteRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  AlertasRoute: AlertasRoute,
   AuthRoute: AuthRoute,
   StockTickerRoute: StockTickerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

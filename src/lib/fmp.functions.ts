@@ -58,6 +58,112 @@ export const searchStocks = createServerFn({ method: "GET" })
     return merged.slice(0, 10);
   });
 
+// ---------- Market snapshot (ticker strip) ----------
+export type MarketQuote = {
+  symbol: string;
+  name: string;
+  price: number;
+  changePercent: number;
+};
+
+const SNAPSHOT_SYMBOLS: { symbol: string; name: string }[] = [
+  { symbol: "^GSPC", name: "S&P 500" },
+  { symbol: "^IXIC", name: "NASDAQ" },
+  { symbol: "^DJI", name: "Dow Jones" },
+  { symbol: "^RUT", name: "Russell 2000" },
+  { symbol: "EURUSD", name: "EUR/USD" },
+];
+
+export const getMarketSnapshot = createServerFn({ method: "GET" }).handler(
+  async (): Promise<MarketQuote[]> => {
+    const results = await Promise.all(
+      SNAPSHOT_SYMBOLS.map(async ({ symbol, name }) => {
+        try {
+          const arr = await fmp<any[]>(`/quote?symbol=${encodeURIComponent(symbol)}`);
+          const q = arr?.[0];
+          if (!q) return null;
+          return {
+            symbol,
+            name,
+            price: Number(q.price ?? 0),
+            changePercent: Number(q.changePercentage ?? q.changesPercentage ?? 0),
+          };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return results.filter((r): r is MarketQuote => r !== null);
+  },
+);
+
+// ---------- Index history (candlestick) ----------
+export type Candle = { date: string; open: number; high: number; low: number; close: number };
+
+export const getIndexHistory = createServerFn({ method: "GET" })
+  .inputValidator((d: { symbol: string; range: "1M" | "1A" | "3A" | "5A" }) =>
+    z
+      .object({
+        symbol: z.string().min(1),
+        range: z.enum(["1M", "1A", "3A", "5A"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }): Promise<Candle[]> => {
+    const all = await fmp<any[]>(
+      `/historical-price-eod/full?symbol=${encodeURIComponent(data.symbol)}`,
+    );
+    const days = data.range === "1M" ? 31 : data.range === "1A" ? 366 : data.range === "3A" ? 366 * 3 : 366 * 5;
+    const cutoff = Date.now() - days * 86400_000;
+    return (all ?? [])
+      .filter((r) => new Date(r.date).getTime() >= cutoff)
+      .map((r) => ({
+        date: String(r.date),
+        open: Number(r.open),
+        high: Number(r.high),
+        low: Number(r.low),
+        close: Number(r.close),
+      }))
+      .reverse();
+  });
+
+// ---------- Market news (Google News RSS fallback — FMP news endpoint restricted) ----------
+export type NewsItem = { title: string; source: string; url: string; publishedAt: string };
+
+export const getMarketNews = createServerFn({ method: "GET" }).handler(
+  async (): Promise<NewsItem[]> => {
+    try {
+      const res = await fetch(
+        "https://news.google.com/rss/search?q=stock+market+OR+wall+street&hl=en-US&gl=US&ceid=US:en",
+        { headers: { "User-Agent": "Mozilla/5.0" } },
+      );
+      if (!res.ok) return [];
+      const xml = await res.text();
+      const items: NewsItem[] = [];
+      const itemRe = /<item>([\s\S]*?)<\/item>/g;
+      const tag = (block: string, name: string) => {
+        const m = block.match(new RegExp(`<${name}>([\\s\\S]*?)<\/${name}>`));
+        return m ? m[1].replace(/<!\[CDATA\[(.*?)\]\]>/s, "$1").trim() : "";
+      };
+      let m;
+      while ((m = itemRe.exec(xml)) && items.length < 5) {
+        const block = m[1];
+        const rawTitle = tag(block, "title");
+        const link = tag(block, "link");
+        const pub = tag(block, "pubDate");
+        // Google News titles end with " - Source Name"
+        const dash = rawTitle.lastIndexOf(" - ");
+        const title = dash > 0 ? rawTitle.slice(0, dash) : rawTitle;
+        const source = dash > 0 ? rawTitle.slice(dash + 3) : "";
+        items.push({ title, source, url: link, publishedAt: pub });
+      }
+      return items;
+    } catch {
+      return [];
+    }
+  },
+);
+
 export type StockData = {
   ticker: string;
   companyName: string;
