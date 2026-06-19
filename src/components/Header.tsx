@@ -15,12 +15,10 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-between gap-4 px-6 lg:px-10">
-        <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <LineChart className="h-4 w-4" />
-          </span>
-          <span>
+      <div className="mx-auto flex h-20 max-w-[1400px] items-center justify-between gap-4 px-6 lg:px-10">
+        <Link to="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
+          <img src="/logo-icon.png" alt="ValueScope" className="h-10 w-10" />
+          <span className="text-xl">
             Value<span className="text-primary">Scope</span>
           </span>
         </Link>
@@ -42,23 +40,23 @@ export function Header() {
           </Link>
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {user ? (
             <>
               <span className="hidden items-center gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-1 text-xs text-muted-foreground sm:inline-flex">
                 <User className="h-3.5 w-3.5" />
                 <span className="max-w-[160px] truncate">{user.email}</span>
               </span>
-              <Button variant="ghost" size="sm" onClick={handleLogout}>
+              <Button variant="ghost" size="default" onClick={handleLogout}>
                 <LogOut className="mr-1 h-4 w-4" /> Sair
               </Button>
             </>
           ) : (
             <>
-              <Button asChild variant="ghost" size="sm">
+              <Button asChild variant="ghost" size="default">
                 <Link to="/auth">Entrar</Link>
               </Button>
-              <Button asChild size="sm">
+              <Button asChild size="default">
                 <Link to="/auth" search={{ mode: "register" }}>
                   Registar
                 </Link>
