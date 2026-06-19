@@ -182,7 +182,7 @@ export function SP500Chart() {
                 orientation="right"
               />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "var(--border)" }} />
-              <Bar dataKey="high" shape={makeCandlestick(yDomain)} isAnimationActive={false} background={false as any} />
+              <Bar dataKey="high" shape={makeCandlestick(yDomain) as any} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
         )}
