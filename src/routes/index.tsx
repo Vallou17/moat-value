@@ -59,11 +59,11 @@ function Home() {
             <TrendingUp className="h-3 w-3 text-primary" /> Valor intrínseco por DCF
           </div>
           <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-5xl">
-            Saiba quanto vale <span className="text-primary">realmente</span> uma ação
+            Sabes se uma ação está <span className="text-primary">valorizada</span> ou{" "}
+            <span className="text-primary">desvalorizada</span>?
           </h1>
           <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
-            Pesquise qualquer ação e veja imediatamente dois cálculos de valor intrínseco,
-            totalmente personalizáveis.
+            Pesquisa qualquer ação e fica a conhecer o seu valor intrínseco.
           </p>
           <div className="mt-8">
             <StockSearch autoFocus />
