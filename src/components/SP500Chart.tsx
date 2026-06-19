@@ -23,35 +23,41 @@ function fmtNum(n: number): string {
   }).format(n);
 }
 
-// Custom candlestick shape — renders wick (high-low) + body (open-close).
-function Candlestick(props: any) {
-  const { x, width, payload, yAxis } = props;
-  if (!payload || !yAxis?.scale) return null;
-  const scale = yAxis.scale;
-  const { open, close, high, low } = payload as Candle;
-  const up = close >= open;
-  const color = up ? "var(--success)" : "var(--destructive)";
-  const yHigh = scale(high);
-  const yLow = scale(low);
-  const yOpen = scale(open);
-  const yClose = scale(close);
-  const bodyTop = Math.min(yOpen, yClose);
-  const bodyH = Math.max(1, Math.abs(yClose - yOpen));
-  const cx = x + width / 2;
-  const bodyW = Math.max(1, width * 0.7);
-  return (
-    <g>
-      <line x1={cx} x2={cx} y1={yHigh} y2={yLow} stroke={color} strokeWidth={1} />
-      <rect
-        x={cx - bodyW / 2}
-        y={bodyTop}
-        width={bodyW}
-        height={bodyH}
-        fill={color}
-        stroke={color}
-      />
-    </g>
-  );
+// Custom candlestick shape — uses chart "background" (full plot area) + known
+// yDomain to project price → pixel y, since recharts doesn't pass scale to shapes.
+function makeCandlestick(domain: [number, number] | undefined) {
+  return function Candlestick(props: any) {
+    const { x, width, payload, background } = props;
+    if (!payload || !background || !domain) return null;
+    const [lo, hi] = domain;
+    const range = hi - lo;
+    if (range <= 0) return null;
+    const project = (v: number) => background.y + ((hi - v) / range) * background.height;
+    const { open, close, high, low } = payload as Candle;
+    const up = close >= open;
+    const color = up ? "var(--success)" : "var(--destructive)";
+    const yHigh = project(high);
+    const yLow = project(low);
+    const yOpen = project(open);
+    const yClose = project(close);
+    const bodyTop = Math.min(yOpen, yClose);
+    const bodyH = Math.max(1, Math.abs(yClose - yOpen));
+    const cx = x + width / 2;
+    const bodyW = Math.max(1, width * 0.7);
+    return (
+      <g>
+        <line x1={cx} x2={cx} y1={yHigh} y2={yLow} stroke={color} strokeWidth={1} />
+        <rect
+          x={cx - bodyW / 2}
+          y={bodyTop}
+          width={bodyW}
+          height={bodyH}
+          fill={color}
+          stroke={color}
+        />
+      </g>
+    );
+  };
 }
 
 function ChartTooltip({ active, payload }: any) {
