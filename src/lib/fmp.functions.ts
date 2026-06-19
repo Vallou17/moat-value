@@ -127,18 +127,12 @@ export const getIndexHistory = createServerFn({ method: "GET" })
       .reverse();
   });
 
-// ---------- Market news (Google News RSS fallback — FMP news endpoint restricted) ----------
+// ---------- Market news (Yahoo Finance RSS — FMP news endpoint restricted, Google News blocks article links) ----------
 export type NewsItem = { title: string; source: string; url: string; publishedAt: string };
 
 export const getMarketNews = createServerFn({ method: "GET" }).handler(
   async (): Promise<NewsItem[]> => {
-    try {
-      const res = await fetch(
-        "https://news.google.com/rss/search?q=stock+market+OR+wall+street&hl=en-US&gl=US&ceid=US:en",
-        { headers: { "User-Agent": "Mozilla/5.0" } },
-      );
-      if (!res.ok) return [];
-      const xml = await res.text();
+    const parseRss = (xml: string): NewsItem[] => {
       const items: NewsItem[] = [];
       const itemRe = /<item>([\s\S]*?)<\/item>/g;
       const tag = (block: string, name: string) => {
@@ -148,19 +142,32 @@ export const getMarketNews = createServerFn({ method: "GET" }).handler(
       let m;
       while ((m = itemRe.exec(xml)) && items.length < 5) {
         const block = m[1];
-        const rawTitle = tag(block, "title");
+        const title = tag(block, "title");
         const link = tag(block, "link");
         const pub = tag(block, "pubDate");
-        // Google News titles end with " - Source Name"
-        const dash = rawTitle.lastIndexOf(" - ");
-        const title = dash > 0 ? rawTitle.slice(0, dash) : rawTitle;
-        const source = dash > 0 ? rawTitle.slice(dash + 3) : "";
-        items.push({ title, source, url: link, publishedAt: pub });
+        const source = tag(block, "source") || "Yahoo Finance";
+        if (title && link) items.push({ title, source, url: link, publishedAt: pub });
       }
       return items;
-    } catch {
-      return [];
+    };
+
+    const sources = [
+      "https://finance.yahoo.com/news/rssindex",
+      "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+    ];
+
+    for (const src of sources) {
+      try {
+        const res = await fetch(src, { headers: { "User-Agent": "Mozilla/5.0" } });
+        if (!res.ok) continue;
+        const xml = await res.text();
+        const items = parseRss(xml);
+        if (items.length) return items;
+      } catch {
+        // try next source
+      }
     }
+    return [];
   },
 );
 
