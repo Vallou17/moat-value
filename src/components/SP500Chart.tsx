@@ -23,17 +23,19 @@ function fmtNum(n: number): string {
   }).format(n);
 }
 
-// Custom candlestick shape — uses chart "background" (full plot area) + known
-// yDomain to project price → pixel y, since recharts doesn't pass scale to shapes.
+// Custom candlestick shape. Recharts passes the bar's own pixel rect:
+//   props.y = scale(payload.high), props.y+props.height = scale(domainMin)
+// We invert that to project any price → pixel y.
 function makeCandlestick(domain: [number, number] | undefined) {
   return function Candlestick(props: any) {
-    const { x, width, payload, background } = props;
-    if (!payload || !background || !domain) return null;
-    const [lo, hi] = domain;
-    const range = hi - lo;
-    if (range <= 0) return null;
-    const project = (v: number) => background.y + ((hi - v) / range) * background.height;
+    const { x, y, width, height, payload } = props;
+    if (!payload || !domain || height <= 0) return null;
     const { open, close, high, low } = payload as Candle;
+    const [domainMin] = domain;
+    const denom = high - domainMin;
+    if (denom <= 0) return null;
+    const pxPerUnit = height / denom;
+    const project = (v: number) => y + (high - v) * pxPerUnit;
     const up = close >= open;
     const color = up ? "var(--success)" : "var(--destructive)";
     const yHigh = project(high);
