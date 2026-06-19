@@ -75,7 +75,15 @@
 
 @layer base {
   * { border-color: var(--color-border); }
-  html, body { background-color: var(--color-background); color: var(--color-foreground); }
+  html, body {
+    background-color: var(--color-background);
+    background-image:
+      radial-gradient(ellipse 1200px 800px at 20% -10%, oklch(0.66 0.16 290 / 0.16), transparent 60%),
+      radial-gradient(ellipse 1000px 700px at 100% 0%, oklch(0.66 0.16 290 / 0.10), transparent 55%);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    color: var(--color-foreground);
+  }
   body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 }
 
