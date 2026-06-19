@@ -55,10 +55,6 @@ function Home() {
       <div className="mx-auto max-w-[1400px] px-6 pb-20 lg:px-10">
         {/* Hero */}
         <section className="mx-auto max-w-3xl pt-10 text-center sm:pt-16">
-          <div className="mx-auto inline-flex max-w-md items-center gap-2 rounded-full border border-border bg-card/60 px-4 py-1.5 text-center text-xs text-muted-foreground">
-            <TrendingUp className="h-3 w-3 shrink-0 text-primary" /> Valor intrínseco calculado
-            através de algoritmo próprio derivado do método Discounted Cash Flow
-          </div>
           <h1 className="mt-4 text-3xl font-extrabold tracking-tight sm:text-5xl">
             Sabes se uma ação está <span className="text-primary">valorizada</span> ou{" "}
             <span className="text-primary">desvalorizada</span>?
@@ -68,6 +64,10 @@ function Home() {
           </p>
           <div className="mt-8">
             <StockSearch autoFocus />
+          </div>
+          <div className="mx-auto mt-4 inline-flex max-w-full items-center gap-2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-card/60 px-4 py-1.5 text-xs text-muted-foreground">
+            <TrendingUp className="h-3 w-3 shrink-0 text-primary" /> Valor intrínseco calculado
+            através de algoritmo próprio derivado do método Discounted Cash Flow
           </div>
         </section>
 
