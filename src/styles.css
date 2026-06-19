@@ -84,3 +84,12 @@
 @utility bg-success-soft { background-color: color-mix(in oklch, var(--color-success) 15%, transparent); }
 @utility bg-destructive-soft { background-color: color-mix(in oklch, var(--color-destructive) 15%, transparent); }
 @utility bg-primary-soft { background-color: color-mix(in oklch, var(--color-primary) 15%, transparent); }
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: marquee 60s linear infinite;
+}
+.animate-marquee:hover { animation-play-state: paused; }
