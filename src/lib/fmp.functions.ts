@@ -132,23 +132,27 @@ export type NewsItem = { title: string; source: string; url: string; publishedAt
 
 export const getMarketNews = createServerFn({ method: "GET" }).handler(
   async (): Promise<NewsItem[]> => {
-    const parseRss = (xml: string): NewsItem[] => {
+const parseRss = (xml: string): NewsItem[] => {
       const items: NewsItem[] = [];
       const itemRe = /<item>([\s\S]*?)<\/item>/g;
       const tag = (block: string, name: string) => {
-        const m = block.match(new RegExp(`<${name}>([\\s\\S]*?)<\/${name}>`));
+        const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`));
         return m ? m[1].replace(/<!\[CDATA\[(.*?)\]\]>/s, "$1").trim() : "";
       };
       let m;
-      while ((m = itemRe.exec(xml)) && items.length < 5) {
+      while ((m = itemRe.exec(xml))) {
         const block = m[1];
         const title = tag(block, "title");
         const link = tag(block, "link");
         const pub = tag(block, "pubDate");
         const source = tag(block, "source") || "Yahoo Finance";
-        if (title && link) items.push({ title, source, url: link, publishedAt: pub });
+        const pubMs = new Date(pub).getTime();
+        if (!title || !link || !isFinite(pubMs)) continue;
+        if (Date.now() - pubMs > 4 * 24 * 60 * 60 * 1000) continue;
+        items.push({ title, source, url: link, publishedAt: pub });
       }
-      return items;
+      items.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      return items.slice(0, 5);
     };
 
     const sources = [
