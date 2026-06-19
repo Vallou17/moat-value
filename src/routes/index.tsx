@@ -58,7 +58,7 @@ function Home() {
           <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
             <TrendingUp className="h-3 w-3 text-primary" /> Valor intrínseco por DCF
           </div>
-          <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-5xl">
+          <h1 className="mt-4 text-3xl font-extrabold tracking-tight sm:text-5xl">
             Sabes se uma ação está <span className="text-primary">valorizada</span> ou{" "}
             <span className="text-primary">desvalorizada</span>?
           </h1>
