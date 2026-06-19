@@ -1,7 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { TrendingUp, Star, Clock, ChevronRight } from "lucide-react";
+import { TrendingUp, Star, Clock, ChevronRight, ArrowDown, ArrowUp } from "lucide-react";
 import { StockSearch } from "@/components/StockSearch";
+import { MarketTicker } from "@/components/MarketTicker";
+import { SP500Chart } from "@/components/SP500Chart";
+import { MarketNews } from "@/components/MarketNews";
 import { Card } from "@/components/ui/card";
 import { getRecent } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
@@ -46,50 +49,65 @@ function Home() {
   }, [user]);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-20 pt-10 sm:pt-16">
-      <div className="text-center">
-        <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
-          <TrendingUp className="h-3 w-3 text-primary" /> Valor intrínseco por DCF
-        </div>
-        <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-5xl">
-          Saiba quanto vale <span className="text-primary">realmente</span> uma ação
-        </h1>
-        <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
-          Pesquise qualquer ação e veja imediatamente dois cálculos de valor intrínseco,
-          totalmente personalizáveis.
-        </p>
-      </div>
+    <>
+      <MarketTicker />
 
-      <div className="mt-8">
-        <StockSearch autoFocus />
-      </div>
-
-      {watchlist.length > 0 && (
-        <section className="mt-12">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            <Star className="h-4 w-4 text-primary" /> Watchlist
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {watchlist.map((w) => (
-              <TickerCard key={w.ticker} ticker={w.ticker} name={w.company_name ?? ""} />
-            ))}
+      <div className="mx-auto max-w-6xl px-4 pb-20">
+        {/* Hero */}
+        <section className="mx-auto max-w-3xl pt-10 text-center sm:pt-16">
+          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground">
+            <TrendingUp className="h-3 w-3 text-primary" /> Valor intrínseco por DCF
+          </div>
+          <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-5xl">
+            Saiba quanto vale <span className="text-primary">realmente</span> uma ação
+          </h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
+            Pesquise qualquer ação e veja imediatamente dois cálculos de valor intrínseco,
+            totalmente personalizáveis.
+          </p>
+          <div className="mt-8">
+            <StockSearch autoFocus />
           </div>
         </section>
-      )}
 
-      {recent.length > 0 && (
-        <section className="mt-10">
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            <Clock className="h-4 w-4" /> Vistos recentemente
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {recent.map((r) => (
-              <TickerCard key={r.ticker} ticker={r.ticker} name={r.name} />
-            ))}
+        {/* Chart + News */}
+        <section className="mt-12 grid gap-4 lg:grid-cols-5">
+          <div className="lg:col-span-3">
+            <SP500Chart />
+          </div>
+          <div className="lg:col-span-2">
+            <MarketNews />
           </div>
         </section>
-      )}
-    </div>
+
+        {/* Watchlist */}
+        {watchlist.length > 0 && (
+          <section className="mt-10">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              <Star className="h-4 w-4 text-primary" /> Watchlist
+            </h2>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {watchlist.map((w) => (
+                <TickerCard key={w.ticker} ticker={w.ticker} name={w.company_name ?? ""} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {recent.length > 0 && (
+          <section className="mt-10">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              <Clock className="h-4 w-4" /> Vistos recentemente
+            </h2>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {recent.map((r) => (
+                <TickerCard key={r.ticker} ticker={r.ticker} name={r.name} />
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -106,3 +124,6 @@ function TickerCard({ ticker, name }: { ticker: string; name: string }) {
     </Link>
   );
 }
+
+// Re-export for downstream typecheck reference (unused icons trimmed)
+export { ArrowDown, ArrowUp };
