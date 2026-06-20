@@ -151,15 +151,16 @@ export function SP500Chart() {
   const snapshot = useQuery({
     queryKey: ["market-snapshot"],
     queryFn: () => getMarketSnapshot(),
-    refetchInterval: 60_000,
-    staleTime: 55_000,
+    refetchInterval: 10 * 60_000,
+    staleTime: 9 * 60_000,
   });
   const sp = snapshot.data?.find((q) => q.symbol === "^GSPC");
 
   const history = useQuery({
     queryKey: ["index-history", "^GSPC", range],
     queryFn: () => getIndexHistory({ data: { symbol: "^GSPC", range } }),
-    staleTime: 5 * 60_000,
+    staleTime: 30 * 60_000,
+    gcTime: 60 * 60_000,
   });
 
   const useWeekly = range !== "1M" && granularity === "weekly";
