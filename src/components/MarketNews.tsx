@@ -25,8 +25,8 @@ export function MarketNews() {
   });
 
   return (
-    <Card className="flex h-full flex-col p-5">
-      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+    <Card className="flex h-full flex-col p-4 sm:p-5">
+      <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:mb-4 sm:gap-2 sm:text-sm">
         <Newspaper className="h-4 w-4 text-primary" /> Últimas notícias
       </h2>
 
