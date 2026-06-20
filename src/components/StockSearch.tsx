@@ -66,9 +66,9 @@ export function StockSearch({ autoFocus = false }: { autoFocus?: boolean }) {
           onKeyDown={(e) => {
             if (e.key === "Enter" && results[0]) go(results[0].ticker);
           }}
-          placeholder="Pesquisar ação (ex: AAPL, Microsoft)"
+          placeholder="Pesquisar ação (ex: AAPL)"
           autoFocus={autoFocus}
-          className="h-12 pl-10 pr-10 text-base"
+          className="h-11 pl-10 pr-10 text-sm sm:h-12 sm:text-base"
         />
         {loading && (
           <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
