@@ -291,6 +291,8 @@ export function SP500Chart() {
               </div>
             </div>
           )}
+        </div>
+      </div>
 
       <div className="h-[360px] w-full">
         {history.isLoading ? (
