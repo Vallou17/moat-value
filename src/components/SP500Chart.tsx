@@ -21,15 +21,17 @@ const MONTHS_PT = [
   "Jul.", "Ago.", "Set.", "Out.", "Nov.", "Dez.",
 ];
 
-// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A: "15 Jun. 26" (year included for clarity)
+// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A: "Jun. 26"
 function formatAxisDate(dateStr: string, range: Range): string {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   const month = MONTHS_PT[d.getMonth()];
-  const day = String(d.getDate()).padStart(2, "0");
-  if (range === "1M") return `${day} ${month}`;
+  if (range === "1M") {
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${day} ${month}`;
+  }
   const yy = String(d.getFullYear()).slice(2);
-  return `${day} ${month} ${yy}`;
+  return `${month} ${yy}`;
 }
 
 // ISO week key, e.g. "2026-W25" — weeks run Monday to Sunday.
@@ -130,9 +132,14 @@ function makeCandlestick(domain: [number, number] | undefined) {
 function ChartTooltip({ active, payload, range }: any) {
   if (!active || !payload?.length) return null;
   const c = payload[0].payload as Candle;
+  const variation = c.open ? ((c.close - c.open) / c.open) * 100 : 0;
+  const up = variation >= 0;
   return (
     <div className="rounded-md border border-border bg-popover px-3 py-2 text-xs shadow-md">
-      {formatAxisDate(c.date, range)}
+      <div className="font-medium">{formatAxisDate(c.date, range)}</div>
+      <div className={`mt-0.5 font-medium ${up ? "text-success" : "text-destructive"}`}>
+        {(up ? "+" : "") + variation.toFixed(2)}%
+      </div>
     </div>
   );
 }
@@ -260,27 +267,30 @@ export function SP500Chart() {
             ))}
           </div>
           {range !== "1M" && (
-            <div className="flex gap-1">
-              <Button
-                variant={granularity === "daily" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-6 px-2 text-[11px]"
-                onClick={() => setGranularity("daily")}
-              >
-                Diário
-              </Button>
-              <Button
-                variant={granularity === "weekly" ? "secondary" : "ghost"}
-                size="sm"
-                className="h-6 px-2 text-[11px]"
-                onClick={() => setGranularity("weekly")}
-              >
-                Semanal
-              </Button>
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Frequência das velas
+              </span>
+              <div className="flex gap-1">
+                <Button
+                  variant={granularity === "daily" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setGranularity("daily")}
+                >
+                  Diária
+                </Button>
+                <Button
+                  variant={granularity === "weekly" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => setGranularity("weekly")}
+                >
+                  Semanal
+                </Button>
+              </div>
             </div>
           )}
-        </div>
-      </div>
 
       <div className="h-[360px] w-full">
         {history.isLoading ? (
@@ -291,7 +301,11 @@ export function SP500Chart() {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <ComposedChart
+              data={chartData}
+              margin={{ top: 10, right: 0, left: 0, bottom: 0 }}
+              barCategoryGap="20%"
+            >
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
@@ -303,7 +317,7 @@ export function SP500Chart() {
                 domain={yDomain ?? ["auto", "auto"]}
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 tickFormatter={(v) => Math.round(Number(v)).toLocaleString("pt-PT")}
-                width={60}
+                width={44}
                 orientation="right"
               />
               <Tooltip
