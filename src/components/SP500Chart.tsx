@@ -216,17 +216,18 @@ export function SP500Chart() {
   const up = (sp?.changePercent ?? 0) >= 0;
 
   return (
-    <Card className="flex h-full flex-col p-5">
-      <div className="mb-4 flex items-start justify-between gap-4">
+    <Card className="flex h-full flex-col p-4 sm:p-5">
+      <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            <LineChart className="h-4 w-4 text-primary" /> Evolução do mercado (S&amp;P 500)
+          <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
+            <LineChart className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Evolução do
+            mercado (S&amp;P 500)
           </h2>
           {sp ? (
             <div className="mt-1 flex flex-wrap items-baseline gap-2">
-              <span className="text-2xl font-bold">{fmtNum(sp.price)}</span>
+              <span className="text-xl font-bold sm:text-2xl">{fmtNum(sp.price)}</span>
               <span
-                className={`inline-flex items-center gap-0.5 text-sm font-medium ${
+                className={`inline-flex items-center gap-0.5 text-xs font-medium sm:text-sm ${
                   up ? "text-success" : "text-destructive"
                 }`}
               >
@@ -235,7 +236,7 @@ export function SP500Chart() {
               </span>
               {periodVariation !== null && (
                 <span
-                  className={`inline-flex items-center gap-0.5 text-sm font-medium ${
+                  className={`inline-flex items-center gap-0.5 text-xs font-medium sm:text-sm ${
                     periodVariation >= 0 ? "text-success" : "text-destructive"
                   }`}
                 >
@@ -253,7 +254,7 @@ export function SP500Chart() {
             <div className="mt-1 h-7 w-32 animate-pulse rounded bg-muted" />
           )}
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-row items-center justify-between gap-2 sm:flex-col sm:items-end">
           <div className="flex gap-1">
             {RANGES.map((r) => (
               <Button
@@ -290,7 +291,7 @@ export function SP500Chart() {
         </div>
       </div>
 
-      <div className="h-[360px] w-full">
+      <div className="h-[260px] w-full sm:h-[360px]">
         {history.isLoading ? (
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
         ) : history.isError || chartData.length === 0 ? (
