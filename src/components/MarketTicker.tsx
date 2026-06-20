@@ -37,8 +37,8 @@ export function MarketTicker() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["market-snapshot"],
     queryFn: () => getMarketSnapshot(),
-    refetchInterval: 60_000,
-    staleTime: 55_000,
+    refetchInterval: 10 * 60_000,
+    staleTime: 9 * 60_000,
   });
 
   if (isLoading) {
