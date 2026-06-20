@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { TrendingUp, Star, Clock, ChevronRight } from "lucide-react";
+import { Star, Clock, ChevronRight } from "lucide-react";
 import { StockSearch } from "@/components/StockSearch";
 import { MarketTicker } from "@/components/MarketTicker";
 import { SP500Chart } from "@/components/SP500Chart";
@@ -65,10 +65,6 @@ function Home() {
           <div className="mt-8">
             <StockSearch autoFocus />
           </div>
-          <div className="mx-auto mt-4 inline-flex max-w-full items-center gap-2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-card/60 px-4 py-1.5 text-xs text-muted-foreground">
-            <TrendingUp className="h-3 w-3 shrink-0 text-primary" /> Valor intrínseco calculado
-            através de algoritmo próprio derivado do método Discounted Cash Flow
-          </div>
         </section>
 
         {/* Chart + News */}
@@ -125,4 +121,3 @@ function TickerCard({ ticker, name }: { ticker: string; name: string }) {
     </Link>
   );
 }
-
