@@ -18,9 +18,13 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-20 max-w-[1400px] items-center justify-between gap-4 px-6 lg:px-10">
-        <Link to="/" className="flex items-center">
-          <img src={LOGO_DATA_URL} alt="ValueScope" className="h-12" />
+      <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between gap-2 px-4 sm:h-20 sm:gap-4 sm:px-6 lg:px-10">
+        <Link to="/" className="flex shrink-0 items-center">
+          <img
+            src={LOGO_DATA_URL}
+            alt="ValueScope"
+            className="h-8 w-auto sm:h-12"
+          />
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm sm:flex">
@@ -40,23 +44,23 @@ export function Header() {
           </Link>
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
           {user ? (
             <>
               <span className="hidden items-center gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-1 text-xs text-muted-foreground sm:inline-flex">
                 <User className="h-3.5 w-3.5" />
                 <span className="max-w-[160px] truncate">{user.email}</span>
               </span>
-              <Button variant="ghost" size="default" onClick={handleLogout}>
+              <Button variant="ghost" size="sm" className="sm:size-default" onClick={handleLogout}>
                 <LogOut className="mr-1 h-4 w-4" /> Sair
               </Button>
             </>
           ) : (
             <>
-              <Button asChild variant="ghost" size="default">
+              <Button asChild variant="ghost" size="sm" className="text-xs sm:size-default sm:text-sm">
                 <Link to="/auth">Entrar</Link>
               </Button>
-              <Button asChild size="default">
+              <Button asChild size="sm" className="text-xs sm:size-default sm:text-sm">
                 <Link to="/auth" search={{ mode: "register" }}>
                   Registar
                 </Link>
