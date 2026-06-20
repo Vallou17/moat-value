@@ -21,14 +21,15 @@ const MONTHS_PT = [
   "Jul.", "Ago.", "Set.", "Out.", "Nov.", "Dez.",
 ];
 
-// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A (weekly candles): "15 Jun."
+// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A: "15 Jun. 26" (year included for clarity)
 function formatAxisDate(dateStr: string, range: Range): string {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   const month = MONTHS_PT[d.getMonth()];
   const day = String(d.getDate()).padStart(2, "0");
   if (range === "1M") return `${day} ${month}`;
-  return `${day} ${month}`;
+  const yy = String(d.getFullYear()).slice(2);
+  return `${day} ${month} ${yy}`;
 }
 
 // ISO week key, e.g. "2026-W25" — weeks run Monday to Sunday.
@@ -126,28 +127,19 @@ function makeCandlestick(domain: [number, number] | undefined) {
   };
 }
 
-function ChartTooltip({ active, payload }: any) {
+function ChartTooltip({ active, payload, range }: any) {
   if (!active || !payload?.length) return null;
   const c = payload[0].payload as Candle;
-  const up = c.close >= c.open;
   return (
     <div className="rounded-md border border-border bg-popover px-3 py-2 text-xs shadow-md">
-      <div className="mb-1 font-medium">{c.date}</div>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-muted-foreground">
-        <span>Abertura</span><span className="text-right text-foreground">{fmtNum(c.open)}</span>
-        <span>Máximo</span><span className="text-right text-foreground">{fmtNum(c.high)}</span>
-        <span>Mínimo</span><span className="text-right text-foreground">{fmtNum(c.low)}</span>
-        <span>Fecho</span>
-        <span className={`text-right ${up ? "text-success" : "text-destructive"}`}>
-          {fmtNum(c.close)}
-        </span>
-      </div>
+      {formatAxisDate(c.date, range)}
     </div>
   );
 }
 
 export function SP500Chart() {
   const [range, setRange] = useState<Range>("1A");
+  const [granularity, setGranularity] = useState<"daily" | "weekly">("weekly");
 
   const snapshot = useQuery({
     queryKey: ["market-snapshot"],
@@ -163,19 +155,28 @@ export function SP500Chart() {
     staleTime: 5 * 60_000,
   });
 
+  const useWeekly = range !== "1M" && granularity === "weekly";
+
   const chartData = useMemo<Candle[]>(() => {
     const d = history.data;
     if (!d || d.length === 0) return [];
-    return range === "1M" ? d : aggregateWeekly(d);
-  }, [history.data, range]);
+    if (range === "1M") return d;
+    return useWeekly ? aggregateWeekly(d) : d;
+  }, [history.data, range, useWeekly]);
 
   const xTicks = useMemo(() => {
     const dates = chartData.map((c) => c.date);
     if (range === "1M") return sampledTicks(dates, 5); // every ~5 days
+    if (!useWeekly) {
+      // daily candles on long ranges — sample more sparsely
+      if (range === "1A") return sampledTicks(dates, 20);
+      if (range === "3A") return sampledTicks(dates, 60);
+      return sampledTicks(dates, 100); // 5A
+    }
     if (range === "1A") return sampledTicks(dates, 4); // every ~4 weeks (~monthly)
     if (range === "3A") return sampledTicks(dates, 12); // every ~12 weeks (~quarterly)
     return sampledTicks(dates, 20); // 5A: every ~20 weeks
-  }, [chartData, range]);
+  }, [chartData, range, useWeekly]);
 
   const yDomain = useMemo<[number, number] | undefined>(() => {
     if (chartData.length === 0) return undefined;
@@ -210,7 +211,7 @@ export function SP500Chart() {
     <Card className="flex h-full flex-col p-5">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             <LineChart className="h-4 w-4 text-primary" /> Evolução do mercado (S&amp;P 500)
           </h2>
           {sp ? (
@@ -244,18 +245,40 @@ export function SP500Chart() {
             <div className="mt-1 h-7 w-32 animate-pulse rounded bg-muted" />
           )}
         </div>
-        <div className="flex gap-1">
-          {RANGES.map((r) => (
-            <Button
-              key={r}
-              variant={range === r ? "default" : "ghost"}
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={() => setRange(r)}
-            >
-              {r}
-            </Button>
-          ))}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-1">
+            {RANGES.map((r) => (
+              <Button
+                key={r}
+                variant={range === r ? "default" : "ghost"}
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setRange(r)}
+              >
+                {r}
+              </Button>
+            ))}
+          </div>
+          {range !== "1M" && (
+            <div className="flex gap-1">
+              <Button
+                variant={granularity === "daily" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setGranularity("daily")}
+              >
+                Diário
+              </Button>
+              <Button
+                variant={granularity === "weekly" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setGranularity("weekly")}
+              >
+                Semanal
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -279,11 +302,14 @@ export function SP500Chart() {
               <YAxis
                 domain={yDomain ?? ["auto", "auto"]}
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-                tickFormatter={(v) => `${Math.round(Number(v)).toLocaleString("pt-PT")} $`}
-                width={70}
+                tickFormatter={(v) => Math.round(Number(v)).toLocaleString("pt-PT")}
+                width={60}
                 orientation="right"
               />
-              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "var(--border)" }} />
+              <Tooltip
+                content={<ChartTooltip range={range} />}
+                cursor={{ stroke: "var(--border)" }}
+              />
               <Bar dataKey="high" shape={makeCandlestick(yDomain) as any} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
