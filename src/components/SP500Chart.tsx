@@ -267,28 +267,23 @@ export function SP500Chart() {
             ))}
           </div>
           {range !== "1M" && (
-            <div className="flex flex-col items-end gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                Frequência das velas
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  variant={granularity === "daily" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  onClick={() => setGranularity("daily")}
-                >
-                  Diária
-                </Button>
-                <Button
-                  variant={granularity === "weekly" ? "secondary" : "ghost"}
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  onClick={() => setGranularity("weekly")}
-                >
-                  Semanal
-                </Button>
-              </div>
+            <div className="flex gap-1">
+              <Button
+                variant={granularity === "daily" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setGranularity("daily")}
+              >
+                Dia
+              </Button>
+              <Button
+                variant={granularity === "weekly" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setGranularity("weekly")}
+              >
+                Semana
+              </Button>
             </div>
           )}
         </div>
