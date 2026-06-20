@@ -21,34 +21,51 @@ const MONTHS_PT = [
   "Jul.", "Ago.", "Set.", "Out.", "Nov.", "Dez.",
 ];
 
-// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A: "Jun. 26"
+// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A (weekly candles): "15 Jun."
 function formatAxisDate(dateStr: string, range: Range): string {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   const month = MONTHS_PT[d.getMonth()];
-  if (range === "1M") return `${String(d.getDate()).padStart(2, "0")} ${month}`;
-  const yy = String(d.getFullYear()).slice(2);
-  return `${month} ${yy}`;
+  const day = String(d.getDate()).padStart(2, "0");
+  if (range === "1M") return `${day} ${month}`;
+  return `${day} ${month}`;
 }
 
-// Aggregate daily candles into one candle per calendar month.
+// ISO week key, e.g. "2026-W25" — weeks run Monday to Sunday.
+function isoWeekKey(d: Date): string {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  date.setUTCDate(date.getUTCDate() - dayNum + 3); // Thursday of this week
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const week =
+    1 +
+    Math.round(
+      ((date.getTime() - firstThursday.getTime()) / 86400000 -
+        3 +
+        ((firstThursday.getUTCDay() + 6) % 7)) /
+        7,
+    );
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+// Aggregate daily candles into one candle per ISO week (Mon–Sun).
 // open = first trading day's open, close = last trading day's close,
-// high/low = extremes across the month. Date = first day of that month's data (for sorting/labels).
-function aggregateMonthly(daily: Candle[]): Candle[] {
-  const byMonth = new Map<string, Candle[]>();
+// high/low = extremes across the week. Date = the week's first trading day (for labels).
+function aggregateWeekly(daily: Candle[]): Candle[] {
+  const byWeek = new Map<string, Candle[]>();
   for (const c of daily) {
-    const key = c.date.slice(0, 7); // "YYYY-MM"
-    if (!byMonth.has(key)) byMonth.set(key, []);
-    byMonth.get(key)!.push(c);
+    const key = isoWeekKey(new Date(c.date));
+    if (!byWeek.has(key)) byWeek.set(key, []);
+    byWeek.get(key)!.push(c);
   }
-  const months = Array.from(byMonth.keys()).sort();
-  return months.map((key) => {
-    const group = byMonth.get(key)!.slice().sort((a, b) => a.date.localeCompare(b.date));
+  const weeks = Array.from(byWeek.keys()).sort();
+  return weeks.map((key) => {
+    const group = byWeek.get(key)!.slice().sort((a, b) => a.date.localeCompare(b.date));
     const open = group[0].open;
     const close = group[group.length - 1].close;
     const high = Math.max(...group.map((c) => c.high));
     const low = Math.min(...group.map((c) => c.low));
-    return { date: `${key}-01`, open, close, high, low };
+    return { date: group[0].date, open, close, high, low };
   });
 }
 
@@ -149,13 +166,15 @@ export function SP500Chart() {
   const chartData = useMemo<Candle[]>(() => {
     const d = history.data;
     if (!d || d.length === 0) return [];
-    return range === "1M" ? d : aggregateMonthly(d);
+    return range === "1M" ? d : aggregateWeekly(d);
   }, [history.data, range]);
 
   const xTicks = useMemo(() => {
     const dates = chartData.map((c) => c.date);
     if (range === "1M") return sampledTicks(dates, 5); // every ~5 days
-    return undefined; // let recharts space monthly ticks automatically
+    if (range === "1A") return sampledTicks(dates, 4); // every ~4 weeks (~monthly)
+    if (range === "3A") return sampledTicks(dates, 12); // every ~12 weeks (~quarterly)
+    return sampledTicks(dates, 20); // 5A: every ~20 weeks
   }, [chartData, range]);
 
   const yDomain = useMemo<[number, number] | undefined>(() => {
@@ -255,14 +274,13 @@ export function SP500Chart() {
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 tickFormatter={(d) => formatAxisDate(String(d), range)}
                 ticks={xTicks}
-                interval={xTicks ? undefined : "preserveStartEnd"}
                 minTickGap={20}
               />
               <YAxis
                 domain={yDomain ?? ["auto", "auto"]}
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-                tickFormatter={(v) => Math.round(Number(v)).toLocaleString("pt-PT")}
-                width={60}
+                tickFormatter={(v) => `${Math.round(Number(v)).toLocaleString("pt-PT")} $`}
+                width={70}
                 orientation="right"
               />
               <Tooltip content={<ChartTooltip />} cursor={{ stroke: "var(--border)" }} />
