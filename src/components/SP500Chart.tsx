@@ -21,14 +21,46 @@ const MONTHS_PT = [
   "Jul.", "Ago.", "Set.", "Out.", "Nov.", "Dez.",
 ];
 
-// "2026-06-15" -> for 1M: "Jun." | for 1A/3A/5A: "Jun. 26"
+// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A: "Jun. 26"
 function formatAxisDate(dateStr: string, range: Range): string {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   const month = MONTHS_PT[d.getMonth()];
-  if (range === "1M") return month;
+  if (range === "1M") return `${String(d.getDate()).padStart(2, "0")} ${month}`;
   const yy = String(d.getFullYear()).slice(2);
   return `${month} ${yy}`;
+}
+
+// Aggregate daily candles into one candle per calendar month.
+// open = first trading day's open, close = last trading day's close,
+// high/low = extremes across the month. Date = first day of that month's data (for sorting/labels).
+function aggregateMonthly(daily: Candle[]): Candle[] {
+  const byMonth = new Map<string, Candle[]>();
+  for (const c of daily) {
+    const key = c.date.slice(0, 7); // "YYYY-MM"
+    if (!byMonth.has(key)) byMonth.set(key, []);
+    byMonth.get(key)!.push(c);
+  }
+  const months = Array.from(byMonth.keys()).sort();
+  return months.map((key) => {
+    const group = byMonth.get(key)!.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const open = group[0].open;
+    const close = group[group.length - 1].close;
+    const high = Math.max(...group.map((c) => c.high));
+    const low = Math.min(...group.map((c) => c.low));
+    return { date: `${key}-01`, open, close, high, low };
+  });
+}
+
+// Pick every Nth tick value from a sorted list of dates, always including the first and last.
+function sampledTicks(dates: string[], step: number): string[] {
+  if (dates.length === 0) return [];
+  const picked: string[] = [];
+  for (let i = 0; i < dates.length; i += step) picked.push(dates[i]);
+  if (picked[picked.length - 1] !== dates[dates.length - 1]) {
+    picked.push(dates[dates.length - 1]);
+  }
+  return picked;
 }
 
 function fmtNum(n: number): string {
@@ -98,7 +130,7 @@ function ChartTooltip({ active, payload }: any) {
 }
 
 export function SP500Chart() {
-  const [range, setRange] = useState<Range>("1M");
+  const [range, setRange] = useState<Range>("1A");
 
   const snapshot = useQuery({
     queryKey: ["market-snapshot"],
@@ -114,17 +146,44 @@ export function SP500Chart() {
     staleTime: 5 * 60_000,
   });
 
-  const yDomain = useMemo<[number, number] | undefined>(() => {
+  const chartData = useMemo<Candle[]>(() => {
     const d = history.data;
-    if (!d || d.length === 0) return undefined;
+    if (!d || d.length === 0) return [];
+    return range === "1M" ? d : aggregateMonthly(d);
+  }, [history.data, range]);
+
+  const xTicks = useMemo(() => {
+    const dates = chartData.map((c) => c.date);
+    if (range === "1M") return sampledTicks(dates, 5); // every ~5 days
+    return undefined; // let recharts space monthly ticks automatically
+  }, [chartData, range]);
+
+  const yDomain = useMemo<[number, number] | undefined>(() => {
+    if (chartData.length === 0) return undefined;
     let lo = Infinity, hi = -Infinity;
-    for (const c of d) {
+    for (const c of chartData) {
       if (c.low < lo) lo = c.low;
       if (c.high > hi) hi = c.high;
     }
     const pad = (hi - lo) * 0.05;
-    return [lo - pad, hi + pad];
-  }, [history.data]);
+    return [Math.floor(lo - pad), Math.ceil(hi + pad)];
+  }, [chartData]);
+
+  // % change from the first to the last candle in the selected period.
+  const periodVariation = useMemo(() => {
+    if (chartData.length < 2) return null;
+    const first = chartData[0].open;
+    const last = chartData[chartData.length - 1].close;
+    if (!first) return null;
+    return ((last - first) / first) * 100;
+  }, [chartData]);
+
+  const RANGE_LABELS: Record<Range, string> = {
+    "1M": "no último mês",
+    "1A": "no último ano",
+    "3A": "nos últimos 3 anos",
+    "5A": "nos últimos 5 anos",
+  };
 
   const up = (sp?.changePercent ?? 0) >= 0;
 
@@ -132,11 +191,11 @@ export function SP500Chart() {
     <Card className="flex h-full flex-col p-5">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-            <LineChart className="h-4 w-4 text-primary" /> Evolução do mercado
+          <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <LineChart className="h-4 w-4 text-primary" /> Evolução do mercado (S&amp;P 500)
           </h2>
           {sp ? (
-            <div className="mt-1 flex items-baseline gap-2">
+            <div className="mt-1 flex flex-wrap items-baseline gap-2">
               <span className="text-2xl font-bold">{fmtNum(sp.price)}</span>
               <span
                 className={`inline-flex items-center gap-0.5 text-sm font-medium ${
@@ -144,8 +203,23 @@ export function SP500Chart() {
                 }`}
               >
                 {up ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-                {(sp.changePercent >= 0 ? "+" : "") + sp.changePercent.toFixed(2)}%
+                {(sp.changePercent >= 0 ? "+" : "") + sp.changePercent.toFixed(2)}% hoje
               </span>
+              {periodVariation !== null && (
+                <span
+                  className={`inline-flex items-center gap-0.5 text-sm font-medium ${
+                    periodVariation >= 0 ? "text-success" : "text-destructive"
+                  }`}
+                >
+                  {periodVariation >= 0 ? (
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  )}
+                  {(periodVariation >= 0 ? "+" : "") + periodVariation.toFixed(2)}%{" "}
+                  {RANGE_LABELS[range]}
+                </span>
+              )}
             </div>
           ) : (
             <div className="mt-1 h-7 w-32 animate-pulse rounded bg-muted" />
@@ -166,26 +240,28 @@ export function SP500Chart() {
         </div>
       </div>
 
-      <div className="h-[280px] w-full">
+      <div className="h-[360px] w-full">
         {history.isLoading ? (
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
-        ) : history.isError || !history.data || history.data.length === 0 ? (
+        ) : history.isError || chartData.length === 0 ? (
           <div className="grid h-full place-items-center text-sm text-muted-foreground">
             Dados de mercado indisponíveis
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={history.data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 tickFormatter={(d) => formatAxisDate(String(d), range)}
-                minTickGap={30}
+                ticks={xTicks}
+                interval={xTicks ? undefined : "preserveStartEnd"}
+                minTickGap={20}
               />
               <YAxis
                 domain={yDomain ?? ["auto", "auto"]}
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-                tickFormatter={(v) => fmtNum(Number(v))}
+                tickFormatter={(v) => Math.round(Number(v)).toLocaleString("pt-PT")}
                 width={60}
                 orientation="right"
               />
