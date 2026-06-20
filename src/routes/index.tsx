@@ -52,23 +52,23 @@ function Home() {
     <>
       <MarketTicker />
 
-      <div className="mx-auto max-w-[1400px] px-6 pb-20 lg:px-10">
+      <div className="mx-auto max-w-[1400px] px-4 pb-20 sm:px-6 lg:px-10">
         {/* Hero */}
-        <section className="mx-auto max-w-3xl pt-10 text-center sm:pt-16">
-          <h1 className="mt-4 text-3xl font-extrabold tracking-tight sm:text-5xl">
+        <section className="mx-auto max-w-3xl pt-6 text-center sm:pt-16">
+          <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-5xl">
             Sabes se uma ação está <span className="text-primary">valorizada</span> ou{" "}
             <span className="text-primary">desvalorizada</span>?
           </h1>
           <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
             Pesquisa qualquer ação e fica a conhecer o seu valor intrínseco.
           </p>
-          <div className="mt-8">
+          <div className="mt-6 sm:mt-8">
             <StockSearch autoFocus />
           </div>
         </section>
 
         {/* Chart + News */}
-        <section className="mt-12 grid gap-4 lg:grid-cols-5">
+        <section className="mt-8 grid gap-4 sm:mt-12 lg:grid-cols-5">
           <div className="lg:col-span-3">
             <SP500Chart />
           </div>
