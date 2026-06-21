@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   RotateCcw,
   Sparkles,
+  Calculator,
   Star,
   AlertTriangle,
   ChevronDown,
@@ -382,15 +383,23 @@ function IvCard({
                 className="mt-2 text-sm font-semibold sm:text-base"
                 style={{ color: zoneColor }}
               >
-                {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor intrínseco
+                Cotação atual {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor
+                intrínseco
               </div>
-              <div className="mt-1 text-xs font-medium text-muted-foreground">{zoneLabel}</div>
             </div>
-            <Gauge t={gaugeT} color={zoneColor} />
+            <div className="flex flex-col items-center">
+              <Gauge t={gaugeT} color={zoneColor} />
+              <div
+                className="-mt-1 rounded-full px-3 py-1 text-sm font-bold"
+                style={{ color: zoneColor, backgroundColor: `${zoneColor}22` }}
+              >
+                {zoneLabel}
+              </div>
+            </div>
           </div>
 
           <div className="mx-auto mt-4 inline-flex max-w-full items-center gap-2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-card/60 px-4 py-1.5 text-xs text-muted-foreground">
-            <Sparkles className="h-3 w-3 shrink-0 text-primary" /> Valor intrínseco calculado
+            <Calculator className="h-3 w-3 shrink-0 text-primary" /> Valor intrínseco calculado
             através de algoritmo próprio derivado do método Discounted Cash Flow
           </div>
         </>
@@ -403,12 +412,14 @@ function IvCard({
 
 // Simple horizontal-style semicircular gauge with 5 colored zones (undervalued -> overvalued)
 // and a needle pointing at position t (0 = far left/undervalued, 1 = far right/overvalued).
+// Each zone has a native <title> tooltip so hovering reveals its category name.
 function Gauge({ t, color }: { t: number; color: string }) {
   const W = 220;
-  const H = 110;
+  const H = 120;
   const cx = W / 2;
-  const cy = 95;
-  const r = 90;
+  const cy = 105;
+  const r = 84;
+  const strokeW = 18;
   const zones = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
   const zoneSpan = 180 / zones.length;
 
@@ -425,27 +436,33 @@ function Gauge({ t, color }: { t: number; color: string }) {
   };
 
   const needleAngle = 180 - t * 180; // t=0 -> 180 (left), t=1 -> 0 (right)
-  const tip = toXY(needleAngle, r - 18);
+  const tip = toXY(needleAngle, r - 16);
   const base1 = toXY(needleAngle + 90, 5);
   const base2 = toXY(needleAngle - 90, 5);
 
   return (
-    <div className="flex flex-col items-center">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-[220px]">
-        {zones.map((c, i) => {
-          const start = 180 - i * zoneSpan;
-          const end = 180 - (i + 1) * zoneSpan;
-          return (
-            <path key={i} d={arcPath(start, end, r)} stroke={c} strokeWidth={18} fill="none" />
-          );
-        })}
-        <polygon
-          points={`${tip.x},${tip.y} ${base1.x},${base1.y} ${base2.x},${base2.y}`}
-          fill={color}
-        />
-        <circle cx={cx} cy={cy} r={6} fill={color} />
-      </svg>
-    </div>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-[220px] overflow-visible">
+      {zones.map((c, i) => {
+        const start = 180 - i * zoneSpan;
+        const end = 180 - (i + 1) * zoneSpan;
+        return (
+          <path
+            key={i}
+            d={arcPath(start, end, r)}
+            stroke={c}
+            strokeWidth={strokeW}
+            fill="none"
+          >
+            <title>{ZONE_LABELS[i]}</title>
+          </path>
+        );
+      })}
+      <polygon
+        points={`${tip.x},${tip.y} ${base1.x},${base1.y} ${base2.x},${base2.y}`}
+        fill={color}
+      />
+      <circle cx={cx} cy={cy} r={6} fill={color} />
+    </svg>
   );
 }
 
