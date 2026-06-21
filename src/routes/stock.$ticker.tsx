@@ -199,29 +199,41 @@ const defaults = useMemo(
 
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="rounded bg-secondary px-2 py-0.5 font-medium">{data.ticker}</span>
-            {data.exchange && <span>{data.exchange}</span>}
-          </div>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
-            {data.companyName}
-          </h1>
-          <div className="mt-2 flex items-baseline gap-3">
-            <span className="text-3xl font-semibold">{fmtMoney(data.price, data.currency)}</span>
-            <span
-              className={
-                "flex items-center text-sm font-medium " +
-                (data.changePercent >= 0 ? "text-success" : "text-destructive")
-              }
-            >
-              {data.changePercent >= 0 ? (
-                <ArrowUpRight className="h-4 w-4" />
-              ) : (
-                <ArrowDownRight className="h-4 w-4" />
-              )}
-              {fmtPct(data.changePercent, 2)}
-            </span>
+        <div className="flex items-start gap-3">
+          {data.logoUrl && (
+            <img
+              src={data.logoUrl}
+              alt={data.companyName}
+              className="mt-1 h-10 w-10 rounded-lg border border-border/60 bg-white object-contain p-1 sm:h-12 sm:w-12"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+            />
+          )}
+          <div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="rounded bg-secondary px-2 py-0.5 font-medium">{data.ticker}</span>
+              {data.exchange && <span>{data.exchange}</span>}
+            </div>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+              {data.companyName}
+            </h1>
+            <div className="mt-2 flex items-baseline gap-3">
+              <span className="text-3xl font-semibold">{fmtMoney(data.price, data.currency)}</span>
+              <span
+                className={
+                  "flex items-center text-sm font-medium " +
+                  (data.changePercent >= 0 ? "text-success" : "text-destructive")
+                }
+              >
+                {data.changePercent >= 0 ? (
+                  <ArrowUpRight className="h-4 w-4" />
+                ) : (
+                  <ArrowDownRight className="h-4 w-4" />
+                )}
+                {fmtPct(data.changePercent, 2)}
+              </span>
+            </div>
           </div>
         </div>
         <Button variant={inWatch ? "secondary" : "outline"} onClick={toggleWatch} disabled={savingWatch}>
@@ -333,31 +345,112 @@ function IvCard({
   price: number;
   currency: string;
 }) {
-  const dp = discountPremiumPct(price, iv);
-  const discount = dp < 0; // price below IV
-  const tone = discount ? "text-success" : "text-destructive";
-  const bg = discount ? "bg-success-soft" : "bg-destructive-soft";
+  const dp = discountPremiumPct(price, iv); // negative = undervalued, positive = overvalued
+  const discount = dp < 0;
   const valid = isFinite(iv) && iv > 0;
+
+  // Map dp (%) to a 0..1 gauge position. Clamp at +/-60% so extreme cases don't break the needle.
+  const clamped = Math.max(-60, Math.min(60, dp));
+  const gaugeT = (clamped + 60) / 120; // 0 = far undervalued, 1 = far overvalued
+
   return (
-    <Card className={"p-5 " + bg}>
+    <Card className="p-5">
       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </div>
-      <div className="mt-2 text-3xl font-bold">
-        {valid ? fmtMoney(iv, currency) : "—"}
-      </div>
-      {valid && (
-        <div className={"mt-2 text-sm font-medium " + tone}>
-          {discount ? (
-            <>
-              {Math.abs(dp).toFixed(1)}% abaixo do valor intrínseco
-            </>
-          ) : (
-            <>{dp.toFixed(1)}% acima do valor intrínseco</>
-          )}
-        </div>
+
+      {valid ? (
+        <>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-10 gap-y-1 text-center">
+            <div>
+              <div className="text-xs text-muted-foreground">Valor Intrínseco</div>
+              <div className="text-xl font-bold sm:text-2xl">{fmtMoney(iv, currency)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Cotação Atual</div>
+              <div className="text-xl font-bold sm:text-2xl">{fmtMoney(price, currency)}</div>
+            </div>
+          </div>
+
+          <Gauge t={gaugeT} />
+
+          <div
+            className={
+              "mx-auto -mt-2 w-fit rounded-full px-3 py-1 text-center text-sm font-semibold " +
+              (discount ? "bg-success-soft text-success" : "bg-destructive-soft text-destructive")
+            }
+          >
+            {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor intrínseco
+          </div>
+        </>
+      ) : (
+        <div className="mt-2 text-3xl font-bold">—</div>
       )}
     </Card>
+  );
+}
+
+// Semi-circular gauge, 5 colored zones from undervalued (green) to overvalued (red),
+// with a needle pointing at position t (0..1).
+function Gauge({ t }: { t: number }) {
+  const cx = 150;
+  const cy = 140;
+  const r = 110;
+  const zones = [
+    "#2E8B3D", // strongly undervalued
+    "#8FC76B", // mildly undervalued
+    "#F2C744", // fair value
+    "#EF9F3C", // mildly overvalued
+    "#D9483D", // strongly overvalued
+  ];
+  const zoneAngle = 180 / zones.length;
+
+  const polarToXY = (angleDeg: number, radius: number) => {
+    const rad = (angleDeg * Math.PI) / 180;
+    return { x: cx - radius * Math.cos(rad), y: cy - radius * Math.sin(rad) };
+  };
+
+  const arcPath = (startDeg: number, endDeg: number, radius: number) => {
+    const p1 = polarToXY(startDeg, radius);
+    const p2 = polarToXY(endDeg, radius);
+    return `M ${p1.x} ${p1.y} A ${radius} ${radius} 0 0 1 ${p2.x} ${p2.y}`;
+  };
+
+  // needle: t=0 -> 180deg (left/undervalued), t=1 -> 0deg (right/overvalued)
+  const needleAngle = 180 - t * 180;
+  const needleTip = polarToXY(needleAngle, r - 22);
+  const needleBase1 = polarToXY(needleAngle + 90, 6);
+  const needleBase2 = polarToXY(needleAngle - 90, 6);
+
+  return (
+    <svg viewBox="0 0 300 165" className="mx-auto w-full max-w-[300px]">
+      {zones.map((color, i) => {
+        const start = 180 - i * zoneAngle;
+        const end = 180 - (i + 1) * zoneAngle;
+        return (
+          <path
+            key={i}
+            d={arcPath(start, end, r)}
+            stroke={color}
+            strokeWidth={26}
+            fill="none"
+            strokeLinecap="butt"
+          />
+        );
+      })}
+      {/* needle */}
+      <polygon
+        points={`${needleTip.x},${needleTip.y} ${needleBase1.x},${needleBase1.y} ${needleBase2.x},${needleBase2.y}`}
+        fill="var(--foreground)"
+      />
+      <circle cx={cx} cy={cy} r={8} fill="var(--foreground)" />
+      <text x={cx - r + 8} y={cy + 22} fontSize="11" fill="var(--muted-foreground)" textAnchor="start">
+        Subavaliada
+      </text>
+      <text x={cx + r - 8} y={cy + 22} fontSize="11" fill="var(--muted-foreground)" textAnchor="end">
+        Sobreavaliada
+      </text>
+    </svg>
   );
 }
 
