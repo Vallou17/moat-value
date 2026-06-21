@@ -199,12 +199,12 @@ const defaults = useMemo(
 
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-start gap-3">
+        <div className="flex items-center gap-4">
           {data.logoUrl && (
             <img
               src={data.logoUrl}
               alt={data.companyName}
-              className="mt-1 h-10 w-10 rounded-lg border border-border/60 bg-white object-contain p-1 sm:h-12 sm:w-12"
+              className="h-16 w-16 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:h-20 sm:w-20"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
@@ -351,32 +351,38 @@ function IvCard({
 
   // Map dp (%) to a 0..1 gauge position. Clamp at +/-60% so extreme cases don't break the needle.
   const clamped = Math.max(-60, Math.min(60, dp));
-  const gaugeT = (clamped + 60) / 120; // 0 = far undervalued, 1 = far overvalued
+  const gaugeT = (clamped + 60) / 120; // 0 = far undervalued (left), 1 = far overvalued (right)
+
+  const zoneColors = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
+  const zoneIndex = Math.min(4, Math.floor(gaugeT * 5));
+  const zoneColor = zoneColors[zoneIndex];
 
   return (
-    <Card className="p-5">
+    <Card
+      className="overflow-hidden p-5"
+      style={
+        valid
+          ? { background: `linear-gradient(135deg, ${zoneColor}14, transparent 65%)` }
+          : undefined
+      }
+    >
       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </div>
 
       {valid ? (
         <>
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-10 gap-y-1 text-center">
-            <div>
+          <div className="mt-3 flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+            <div className="text-center sm:text-left">
               <div className="text-xs text-muted-foreground">Valor Intrínseco</div>
-              <div className="text-xl font-bold sm:text-2xl">{fmtMoney(iv, currency)}</div>
+              <div className="text-4xl font-bold sm:text-5xl">{fmtMoney(iv, currency)}</div>
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Cotação Atual</div>
-              <div className="text-xl font-bold sm:text-2xl">{fmtMoney(price, currency)}</div>
-            </div>
+            <Gauge t={gaugeT} color={zoneColor} />
           </div>
-
-          <Gauge t={gaugeT} />
 
           <div
             className={
-              "mx-auto -mt-2 w-fit rounded-full px-3 py-1 text-center text-sm font-semibold " +
+              "mx-auto mt-1 w-fit rounded-full px-3 py-1 text-center text-sm font-semibold " +
               (discount ? "bg-success-soft text-success" : "bg-destructive-soft text-destructive")
             }
           >
@@ -390,67 +396,55 @@ function IvCard({
   );
 }
 
-// Semi-circular gauge, 5 colored zones from undervalued (green) to overvalued (red),
-// with a needle pointing at position t (0..1).
-function Gauge({ t }: { t: number }) {
-  const cx = 150;
-  const cy = 140;
-  const r = 110;
-  const zones = [
-    "#2E8B3D", // strongly undervalued
-    "#8FC76B", // mildly undervalued
-    "#F2C744", // fair value
-    "#EF9F3C", // mildly overvalued
-    "#D9483D", // strongly overvalued
-  ];
-  const zoneAngle = 180 / zones.length;
+// Simple horizontal-style semicircular gauge with 5 colored zones (undervalued -> overvalued)
+// and a needle pointing at position t (0 = far left/undervalued, 1 = far right/overvalued).
+function Gauge({ t, color }: { t: number; color: string }) {
+  const W = 220;
+  const H = 120;
+  const cx = W / 2;
+  const cy = 100;
+  const r = 90;
+  const zones = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
+  const zoneSpan = 180 / zones.length;
 
-  const polarToXY = (angleDeg: number, radius: number) => {
+  // angle 180 = left, angle 0 = right, sweeping over the top
+  const toXY = (angleDeg: number, radius: number) => {
     const rad = (angleDeg * Math.PI) / 180;
-    return { x: cx - radius * Math.cos(rad), y: cy - radius * Math.sin(rad) };
+    return { x: cx + radius * Math.cos(rad), y: cy - radius * Math.sin(rad) };
   };
 
   const arcPath = (startDeg: number, endDeg: number, radius: number) => {
-    const p1 = polarToXY(startDeg, radius);
-    const p2 = polarToXY(endDeg, radius);
+    const p1 = toXY(startDeg, radius);
+    const p2 = toXY(endDeg, radius);
     return `M ${p1.x} ${p1.y} A ${radius} ${radius} 0 0 1 ${p2.x} ${p2.y}`;
   };
 
-  // needle: t=0 -> 180deg (left/undervalued), t=1 -> 0deg (right/overvalued)
-  const needleAngle = 180 - t * 180;
-  const needleTip = polarToXY(needleAngle, r - 22);
-  const needleBase1 = polarToXY(needleAngle + 90, 6);
-  const needleBase2 = polarToXY(needleAngle - 90, 6);
+  const needleAngle = 180 - t * 180; // t=0 -> 180 (left), t=1 -> 0 (right)
+  const tip = toXY(needleAngle, r - 18);
+  const base1 = toXY(needleAngle + 90, 5);
+  const base2 = toXY(needleAngle - 90, 5);
 
   return (
-    <svg viewBox="0 0 300 165" className="mx-auto w-full max-w-[300px]">
-      {zones.map((color, i) => {
-        const start = 180 - i * zoneAngle;
-        const end = 180 - (i + 1) * zoneAngle;
-        return (
-          <path
-            key={i}
-            d={arcPath(start, end, r)}
-            stroke={color}
-            strokeWidth={26}
-            fill="none"
-            strokeLinecap="butt"
-          />
-        );
-      })}
-      {/* needle */}
-      <polygon
-        points={`${needleTip.x},${needleTip.y} ${needleBase1.x},${needleBase1.y} ${needleBase2.x},${needleBase2.y}`}
-        fill="var(--foreground)"
-      />
-      <circle cx={cx} cy={cy} r={8} fill="var(--foreground)" />
-      <text x={cx - r + 8} y={cy + 22} fontSize="11" fill="var(--muted-foreground)" textAnchor="start">
-        Subavaliada
-      </text>
-      <text x={cx + r - 8} y={cy + 22} fontSize="11" fill="var(--muted-foreground)" textAnchor="end">
-        Sobreavaliada
-      </text>
-    </svg>
+    <div className="flex flex-col items-center">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-[220px]">
+        {zones.map((c, i) => {
+          const start = 180 - i * zoneSpan;
+          const end = 180 - (i + 1) * zoneSpan;
+          return (
+            <path key={i} d={arcPath(start, end, r)} stroke={c} strokeWidth={18} fill="none" />
+          );
+        })}
+        <polygon
+          points={`${tip.x},${tip.y} ${base1.x},${base1.y} ${base2.x},${base2.y}`}
+          fill={color}
+        />
+        <circle cx={cx} cy={cy} r={6} fill={color} />
+      </svg>
+      <div className="-mt-1 flex w-[220px] justify-between text-[10px] text-muted-foreground">
+        <span>Subavaliada</span>
+        <span>Sobreavaliada</span>
+      </div>
+    </div>
   );
 }
 
