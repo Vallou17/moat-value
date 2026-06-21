@@ -200,18 +200,8 @@ const defaults = useMemo(
 
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-start gap-3 sm:items-center sm:gap-4">
-          {data.logoUrl && (
-            <img
-              src={data.logoUrl}
-              alt={data.companyName}
-              className="h-9 w-9 shrink-0 rounded-lg border border-border/60 bg-white object-contain p-1 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
-            />
-          )}
-          <div>
+        <div className="flex w-full items-start justify-between gap-3 sm:w-auto sm:items-center sm:justify-start sm:gap-4">
+          <div className="order-1">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="rounded bg-secondary px-2 py-0.5 font-medium">{data.ticker}</span>
               {data.exchange && <span>{data.exchange}</span>}
@@ -238,6 +228,16 @@ const defaults = useMemo(
               </span>
             </div>
           </div>
+          {data.logoUrl && (
+            <img
+              src={data.logoUrl}
+              alt={data.companyName}
+              className="order-2 h-16 w-16 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:order-0 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+            />
+          )}
         </div>
         <Button variant={inWatch ? "secondary" : "outline"} onClick={toggleWatch} disabled={savingWatch}>
           <Star className={"mr-2 h-4 w-4 " + (inWatch ? "fill-primary text-primary" : "")} />
@@ -372,8 +372,8 @@ function IvCard({
           : undefined
       }
     >
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
+      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <Calculator className="h-3.5 w-3.5 text-primary" /> {label}
       </div>
 
       {valid ? (
@@ -400,12 +400,9 @@ function IvCard({
             </div>
           </div>
 
-          <div className="mt-4 flex max-w-md items-start gap-2.5 rounded-2xl border border-border bg-card/60 px-4 py-2.5 text-left text-xs text-muted-foreground sm:mx-auto sm:max-w-full sm:items-center sm:rounded-full sm:whitespace-nowrap sm:py-1.5">
-            <Calculator className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary sm:mt-0" />
-            <span>
-              Valor intrínseco calculado através de algoritmo próprio derivado do método
-              Discounted Cash Flow
-            </span>
+          <div className="mt-4 max-w-md rounded-2xl border border-border bg-card/60 px-4 py-2.5 text-left text-[11px] text-muted-foreground sm:mx-auto sm:max-w-full sm:rounded-full sm:whitespace-nowrap sm:py-1.5 sm:text-center sm:text-xs">
+            Valor intrínseco calculado através de algoritmo próprio derivado do método
+            Discounted Cash Flow
           </div>
         </>
       ) : (
