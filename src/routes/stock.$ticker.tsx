@@ -188,7 +188,7 @@ const defaults = useMemo(
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-20 pt-6">
+    <div className="mx-auto max-w-[1400px] px-4 pb-20 pt-6 sm:px-6 lg:px-10">
       <Button
         variant="ghost"
         size="sm"
@@ -584,7 +584,7 @@ function ChartCard({
 
 function StockSkeleton() {
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-20 pt-6">
+    <div className="mx-auto max-w-[1400px] px-4 pb-20 pt-6 sm:px-6 lg:px-10">
       <Skeleton className="h-6 w-20" />
       <Skeleton className="mt-4 h-8 w-2/3" />
       <Skeleton className="mt-2 h-8 w-40" />
