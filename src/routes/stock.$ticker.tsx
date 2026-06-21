@@ -204,7 +204,7 @@ const defaults = useMemo(
             <img
               src={data.logoUrl}
               alt={data.companyName}
-              className="h-16 w-16 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:h-20 sm:w-20"
+              className="h-24 w-24 shrink-0 rounded-2xl border border-border/60 bg-white object-contain p-2 sm:h-28 sm:w-28"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
@@ -334,6 +334,8 @@ const defaults = useMemo(
   );
 }
 
+const ZONE_LABELS = ["Muito subavaliada", "Subavaliada", "Justo valor", "Sobreavaliada", "Muito sobreavaliada"];
+
 function IvCard({
   label,
   iv,
@@ -356,6 +358,7 @@ function IvCard({
   const zoneColors = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
   const zoneIndex = Math.min(4, Math.floor(gaugeT * 5));
   const zoneColor = zoneColors[zoneIndex];
+  const zoneLabel = ZONE_LABELS[zoneIndex];
 
   return (
     <Card
@@ -372,21 +375,23 @@ function IvCard({
 
       {valid ? (
         <>
-          <div className="mt-3 flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+          <div className="mt-3 flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-center sm:text-left">
-              <div className="text-xs text-muted-foreground">Valor Intrínseco</div>
               <div className="text-4xl font-bold sm:text-5xl">{fmtMoney(iv, currency)}</div>
+              <div
+                className="mt-2 text-sm font-semibold sm:text-base"
+                style={{ color: zoneColor }}
+              >
+                {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor intrínseco
+              </div>
+              <div className="mt-1 text-xs font-medium text-muted-foreground">{zoneLabel}</div>
             </div>
             <Gauge t={gaugeT} color={zoneColor} />
           </div>
 
-          <div
-            className={
-              "mx-auto mt-1 w-fit rounded-full px-3 py-1 text-center text-sm font-semibold " +
-              (discount ? "bg-success-soft text-success" : "bg-destructive-soft text-destructive")
-            }
-          >
-            {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor intrínseco
+          <div className="mx-auto mt-4 inline-flex max-w-full items-center gap-2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-card/60 px-4 py-1.5 text-xs text-muted-foreground">
+            <Sparkles className="h-3 w-3 shrink-0 text-primary" /> Valor intrínseco calculado
+            através de algoritmo próprio derivado do método Discounted Cash Flow
           </div>
         </>
       ) : (
@@ -400,9 +405,9 @@ function IvCard({
 // and a needle pointing at position t (0 = far left/undervalued, 1 = far right/overvalued).
 function Gauge({ t, color }: { t: number; color: string }) {
   const W = 220;
-  const H = 120;
+  const H = 110;
   const cx = W / 2;
-  const cy = 100;
+  const cy = 95;
   const r = 90;
   const zones = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
   const zoneSpan = 180 / zones.length;
@@ -440,10 +445,6 @@ function Gauge({ t, color }: { t: number; color: string }) {
         />
         <circle cx={cx} cy={cy} r={6} fill={color} />
       </svg>
-      <div className="-mt-1 flex w-[220px] justify-between text-[10px] text-muted-foreground">
-        <span>Subavaliada</span>
-        <span>Sobreavaliada</span>
-      </div>
     </div>
   );
 }
