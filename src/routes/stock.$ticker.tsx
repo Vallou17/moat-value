@@ -200,12 +200,12 @@ const defaults = useMemo(
 
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-start gap-3 sm:items-center sm:gap-4">
           {data.logoUrl && (
             <img
               src={data.logoUrl}
               alt={data.companyName}
-              className="h-14 w-14 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
+              className="h-9 w-9 shrink-0 rounded-lg border border-border/60 bg-white object-contain p-1 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
@@ -380,9 +380,9 @@ function IvCard({
         <>
           <div className="mt-3 flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-center sm:text-left">
-              <div className="text-4xl font-bold sm:text-5xl">{fmtMoney(iv, currency)}</div>
+              <div className="text-2xl font-bold sm:text-5xl">{fmtMoney(iv, currency)}</div>
               <div
-                className="mt-2 text-sm font-semibold sm:text-base"
+                className="mt-2 whitespace-nowrap text-xs font-semibold sm:text-base"
                 style={{ color: zoneColor }}
               >
                 Cotação atual {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor
@@ -400,8 +400,8 @@ function IvCard({
             </div>
           </div>
 
-          <div className="mx-auto mt-4 flex max-w-md items-start gap-2 rounded-2xl border border-border bg-card/60 px-4 py-2.5 text-center text-xs text-muted-foreground sm:max-w-full sm:rounded-full sm:items-center sm:whitespace-nowrap sm:py-1.5">
-            <Calculator className="mt-0.5 h-3 w-3 shrink-0 text-primary sm:mt-0" />
+          <div className="mt-4 flex max-w-md items-start gap-2.5 rounded-2xl border border-border bg-card/60 px-4 py-2.5 text-left text-xs text-muted-foreground sm:mx-auto sm:max-w-full sm:items-center sm:rounded-full sm:whitespace-nowrap sm:py-1.5">
+            <Calculator className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary sm:mt-0" />
             <span>
               Valor intrínseco calculado através de algoritmo próprio derivado do método
               Discounted Cash Flow
