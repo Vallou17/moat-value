@@ -59,7 +59,7 @@ function Home() {
             Sabes se uma ação está <span className="text-primary">valorizada</span> ou{" "}
             <span className="text-primary">desvalorizada</span>?
           </h1>
-          <p className="mx-auto mt-3 max-w-[340px] text-xs text-muted-foreground sm:max-w-xl sm:text-base">
+          <p className="mx-auto mt-3 whitespace-nowrap text-[11px] text-muted-foreground sm:max-w-xl sm:whitespace-normal sm:text-base">
             Pesquisa qualquer ação e fica a conhecer o seu valor intrínseco.
           </p>
           <div className="mt-6 sm:mt-8">
