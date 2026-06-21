@@ -2,15 +2,15 @@
 // FMP API proxy — keeps the API key server-side.
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-
+ 
 const BASE = "https://financialmodelingprep.com/stable";
-
+ 
 function key() {
   const k = process.env.FMP_API_KEY ?? process.env.VITE_FMP_API_KEY;
   if (!k) throw new Error("Chave FMP_API_KEY não configurada no servidor.");
   return k;
 }
-
+ 
 async function fmp<T = unknown>(path: string): Promise<T> {
   const sep = path.includes("?") ? "&" : "?";
   const url = `${BASE}${path}${sep}apikey=${key()}`;
@@ -25,7 +25,7 @@ async function fmp<T = unknown>(path: string): Promise<T> {
   }
   return json as T;
 }
-
+ 
 export const searchStocks = createServerFn({ method: "GET" })
   .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
   .handler(async ({ data }) => {
@@ -57,7 +57,7 @@ export const searchStocks = createServerFn({ method: "GET" })
     });
     return merged.slice(0, 10);
   });
-
+ 
 // ---------- Market snapshot (ticker strip) ----------
 export type MarketQuote = {
   symbol: string;
@@ -65,7 +65,7 @@ export type MarketQuote = {
   price: number;
   changePercent: number;
 };
-
+ 
 const SNAPSHOT_SYMBOLS: { symbol: string; name: string }[] = [
   { symbol: "^GSPC", name: "S&P 500" },
   { symbol: "^IXIC", name: "NASDAQ" },
@@ -73,7 +73,7 @@ const SNAPSHOT_SYMBOLS: { symbol: string; name: string }[] = [
   { symbol: "^RUT", name: "Russell 2000" },
   { symbol: "EURUSD", name: "EUR/USD" },
 ];
-
+ 
 export const getMarketSnapshot = createServerFn({ method: "GET" }).handler(
   async (): Promise<MarketQuote[]> => {
     const results = await Promise.all(
@@ -96,10 +96,10 @@ export const getMarketSnapshot = createServerFn({ method: "GET" }).handler(
     return results.filter((r): r is MarketQuote => r !== null);
   },
 );
-
+ 
 // ---------- Index history (candlestick) ----------
 export type Candle = { date: string; open: number; high: number; low: number; close: number };
-
+ 
 export const getIndexHistory = createServerFn({ method: "GET" })
   .inputValidator((d: { symbol: string; range: "1M" | "1A" | "3A" | "5A" }) =>
     z
@@ -126,10 +126,10 @@ export const getIndexHistory = createServerFn({ method: "GET" })
       }))
       .reverse();
   });
-
+ 
 // ---------- Market news (Yahoo Finance RSS — FMP news endpoint restricted, Google News blocks article links) ----------
 export type NewsItem = { title: string; source: string; url: string; publishedAt: string };
-
+ 
 export const getMarketNews = createServerFn({ method: "GET" }).handler(
   async (): Promise<NewsItem[]> => {
 const parseRss = (xml: string): NewsItem[] => {
@@ -154,12 +154,12 @@ const parseRss = (xml: string): NewsItem[] => {
       items.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
       return items.slice(0, 5);
     };
-
+ 
     const sources = [
       "https://finance.yahoo.com/news/rssindex",
       "https://feeds.content.dowjones.io/public/rss/mw_topstories",
     ];
-
+ 
     for (const src of sources) {
       try {
         const res = await fetch(src, { headers: { "User-Agent": "Mozilla/5.0" } });
@@ -174,7 +174,7 @@ const parseRss = (xml: string): NewsItem[] => {
     return [];
   },
 );
-
+ 
 export type StockData = {
   ticker: string;
   companyName: string;
@@ -182,6 +182,7 @@ export type StockData = {
   currency: string;
   price: number;
   changePercent: number;
+  logoUrl: string | null;
   freeCashFlow: number;
   operatingCashFlow: number;
   capex: number;
@@ -196,7 +197,7 @@ export type StockData = {
   history: { year: number; revenue: number; fcf: number }[];
   warnings: string[];
 };
-
+ 
 export const getStockData = createServerFn({ method: "GET" })
   .inputValidator((d: { ticker: string }) =>
     z.object({ ticker: z.string().min(1).max(15) }).parse(d),
@@ -204,7 +205,7 @@ export const getStockData = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<StockData> => {
     const t = data.ticker.toUpperCase();
     const warnings: string[] = [];
-
+ 
     const [quoteArr, profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
       await Promise.all([
         fmp<any[]>(`/quote?symbol=${t}`),
@@ -215,14 +216,14 @@ export const getStockData = createServerFn({ method: "GET" })
         fmp<any[]>(`/key-metrics?symbol=${t}&limit=1`).catch(() => []),
         fmp<any[]>(`/analyst-estimates?symbol=${t}&period=annual`).catch(() => []),
       ]);
-
+ 
     if (!quoteArr?.length) throw new Error("Ticker não encontrado");
     const quote = quoteArr[0];
     const profile = profileArr?.[0] ?? {};
     const cash0 = cashArr?.[0];
     const balance0 = balanceArr?.[0];
     if (!cash0 || !balance0) throw new Error("Dados financeiros indisponíveis");
-
+ 
     const freeCashFlow = Number(cash0.freeCashFlow ?? 0);
     const operatingCashFlow = Number(cash0.operatingCashFlow ?? 0);
     const capex = Math.abs(Number(cash0.capitalExpenditure ?? 0));
@@ -232,7 +233,7 @@ export const getStockData = createServerFn({ method: "GET" })
         ? last4.reduce((s, c) => s + Math.abs(Number(c.capitalExpenditure ?? 0)), 0) / last4.length
         : capex;
     const fcfAdjusted = operatingCashFlow - meanCapex4y;
-
+ 
 const rawTotalDebt = balance0.totalDebt;
     const totalDebt =
       typeof rawTotalDebt === "number" && rawTotalDebt > 0
@@ -249,15 +250,15 @@ const rawTotalDebt = balance0.totalDebt;
     const cashBs = Number(
       balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
     );
-
+ 
     const sharesOutstanding =
       Number(quote.marketCap && quote.price ? quote.marketCap / quote.price : 0) ||
       Number(profile.mktCap && quote.price ? profile.mktCap / quote.price : 0) ||
       Number(keyMetricsArr?.[0]?.sharesOutstanding) ||
       Number(quote.sharesOutstanding);
-
+ 
     if (!sharesOutstanding) throw new Error("Número de ações indisponível");
-
+ 
    // Growth rate from analyst estimates: avg of next ~5y EPS growth
     // (Finviz/Zacks/GF "5-year growth rate" is typically EPS-based, not revenue-based)
     let baseGrowthRate = 0;
@@ -273,7 +274,7 @@ const rawTotalDebt = balance0.totalDebt;
           return y >= currentYear && y <= currentYear + 5;
         })
         .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-
+ 
       const futureEps = future.filter((e) => epsEst(e) > 0);
       if (futureEps.length >= 2) {
         const rates: number[] = [];
@@ -297,10 +298,10 @@ const rawTotalDebt = balance0.totalDebt;
         }
       }
     }
-
+ 
     if (freeCashFlow < 0)
       warnings.push("FCF negativo — o cálculo pode não ser fiável.");
-
+ 
     const history = incomeArr
       .slice()
       .reverse()
@@ -314,7 +315,7 @@ const rawTotalDebt = balance0.totalDebt;
         };
       })
       .filter((h) => h.year > 0);
-
+ 
     return {
       ticker: t,
       companyName: profile.companyName ?? quote.name ?? t,
@@ -322,6 +323,7 @@ const rawTotalDebt = balance0.totalDebt;
       currency: profile.currency ?? "USD",
       price: Number(quote.price ?? 0),
       changePercent: Number(quote.changesPercentage ?? 0),
+      logoUrl: profile.image || null,
       freeCashFlow,
       operatingCashFlow,
       capex,
