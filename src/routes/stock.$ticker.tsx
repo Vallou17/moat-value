@@ -390,7 +390,7 @@ function IvCard({
             <div className="flex flex-col items-center">
               <Gauge t={gaugeT} color={zoneColor} />
               <div
-                className="-mt-1 rounded-full px-3 py-1 text-sm font-bold"
+                className="mt-2 rounded-full px-3 py-1 text-sm font-bold"
                 style={{ color: zoneColor, backgroundColor: `${zoneColor}22` }}
               >
                 {zoneLabel}
@@ -410,9 +410,9 @@ function IvCard({
   );
 }
 
-// Simple horizontal-style semicircular gauge with 5 colored zones (undervalued -> overvalued)
+// Interactive horizontal-style semicircular gauge with 5 colored zones (undervalued -> overvalued)
 // and a needle pointing at position t (0 = far left/undervalued, 1 = far right/overvalued).
-// Each zone has a native <title> tooltip so hovering reveals its category name.
+// Hovering a zone brightens it and shows a floating tooltip with that zone's category name.
 function Gauge({ t, color }: { t: number; color: string }) {
   const W = 220;
   const H = 120;
@@ -422,6 +422,7 @@ function Gauge({ t, color }: { t: number; color: string }) {
   const strokeW = 18;
   const zones = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
   const zoneSpan = 180 / zones.length;
+  const [hovered, setHovered] = useState<number | null>(null);
 
   // angle 180 = left, angle 0 = right, sweeping over the top
   const toXY = (angleDeg: number, radius: number) => {
@@ -440,29 +441,59 @@ function Gauge({ t, color }: { t: number; color: string }) {
   const base1 = toXY(needleAngle + 90, 5);
   const base2 = toXY(needleAngle - 90, 5);
 
+  // Lighten a hex color for the hover highlight effect.
+  function lighten(hex: string, amount: number) {
+    const n = parseInt(hex.slice(1), 16);
+    const r0 = (n >> 16) & 255;
+    const g0 = (n >> 8) & 255;
+    const b0 = n & 255;
+    const mix = (c: number) => Math.round(c + (255 - c) * amount);
+    return `rgb(${mix(r0)}, ${mix(g0)}, ${mix(b0)})`;
+  }
+
+  const tooltipPos = hovered !== null ? toXY(180 - (hovered + 0.5) * zoneSpan, r + 28) : null;
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-[220px] overflow-visible">
-      {zones.map((c, i) => {
-        const start = 180 - i * zoneSpan;
-        const end = 180 - (i + 1) * zoneSpan;
-        return (
-          <path
-            key={i}
-            d={arcPath(start, end, r)}
-            stroke={c}
-            strokeWidth={strokeW}
-            fill="none"
-          >
-            <title>{ZONE_LABELS[i]}</title>
-          </path>
-        );
-      })}
-      <polygon
-        points={`${tip.x},${tip.y} ${base1.x},${base1.y} ${base2.x},${base2.y}`}
-        fill={color}
-      />
-      <circle cx={cx} cy={cy} r={6} fill={color} />
-    </svg>
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-[220px] overflow-visible">
+        {zones.map((c, i) => {
+          const start = 180 - i * zoneSpan;
+          const end = 180 - (i + 1) * zoneSpan;
+          const isHovered = hovered === i;
+          return (
+            <path
+              key={i}
+              d={arcPath(start, end, r)}
+              stroke={isHovered ? lighten(c, 0.35) : c}
+              strokeWidth={isHovered ? strokeW + 4 : strokeW}
+              fill="none"
+              className="cursor-pointer transition-all duration-150"
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+            />
+          );
+        })}
+        <polygon
+          points={`${tip.x},${tip.y} ${base1.x},${base1.y} ${base2.x},${base2.y}`}
+          fill={color}
+        />
+        <circle cx={cx} cy={cy} r={6} fill={color} />
+      </svg>
+      {hovered !== null && tooltipPos && (
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold shadow-md"
+          style={{
+            left: tooltipPos.x,
+            top: tooltipPos.y,
+            color: zones[hovered],
+            backgroundColor: `${zones[hovered]}22`,
+            border: `1px solid ${zones[hovered]}55`,
+          }}
+        >
+          {ZONE_LABELS[hovered]}
+        </div>
+      )}
+    </div>
   );
 }
 
