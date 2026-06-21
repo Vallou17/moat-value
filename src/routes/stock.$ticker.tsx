@@ -451,7 +451,13 @@ function Gauge({ t, color }: { t: number; color: string }) {
     return `rgb(${mix(r0)}, ${mix(g0)}, ${mix(b0)})`;
   }
 
-  const tooltipPos = hovered !== null ? toXY(180 - (hovered + 0.5) * zoneSpan, r + 28) : null;
+  // Tooltip anchor point along the arc (percentage-based x, so we can clamp it within the card).
+  const tooltipAnchor =
+    hovered !== null ? toXY(180 - (hovered + 0.5) * zoneSpan, r + 26) : null;
+  // Convert SVG x (0..W) to a 0..100% position, then clamp so the tooltip box (≈110px wide)
+  // never spills past the gauge's own bounding box.
+  const tooltipPctRaw = tooltipAnchor ? (tooltipAnchor.x / W) * 100 : 50;
+  const tooltipPct = Math.max(18, Math.min(82, tooltipPctRaw));
 
   return (
     <div className="relative">
@@ -479,17 +485,19 @@ function Gauge({ t, color }: { t: number; color: string }) {
         />
         <circle cx={cx} cy={cy} r={6} fill={color} />
       </svg>
-      {hovered !== null && tooltipPos && (
+      {hovered !== null && tooltipAnchor && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold shadow-md"
+          className="pointer-events-none absolute z-10 flex -translate-x-1/2 items-center gap-1.5 whitespace-nowrap rounded-md bg-popover px-2.5 py-1.5 text-xs font-semibold text-popover-foreground shadow-lg ring-1 ring-border"
           style={{
-            left: tooltipPos.x,
-            top: tooltipPos.y,
-            color: zones[hovered],
-            backgroundColor: `${zones[hovered]}22`,
-            border: `1px solid ${zones[hovered]}55`,
+            left: `${tooltipPct}%`,
+            top: tooltipAnchor.y,
+            transform: "translate(-50%, -50%)",
           }}
         >
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: zones[hovered] }}
+          />
           {ZONE_LABELS[hovered]}
         </div>
       )}
