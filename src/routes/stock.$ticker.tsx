@@ -200,12 +200,12 @@ const defaults = useMemo(
 
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           {data.logoUrl && (
             <img
               src={data.logoUrl}
               alt={data.companyName}
-              className="h-24 w-24 shrink-0 rounded-2xl border border-border/60 bg-white object-contain p-2 sm:h-28 sm:w-28"
+              className="h-14 w-14 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
@@ -216,11 +216,13 @@ const defaults = useMemo(
               <span className="rounded bg-secondary px-2 py-0.5 font-medium">{data.ticker}</span>
               {data.exchange && <span>{data.exchange}</span>}
             </div>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+            <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-3xl">
               {data.companyName}
             </h1>
             <div className="mt-2 flex items-baseline gap-3">
-              <span className="text-3xl font-semibold">{fmtMoney(data.price, data.currency)}</span>
+              <span className="text-2xl font-semibold sm:text-3xl">
+                {fmtMoney(data.price, data.currency)}
+              </span>
               <span
                 className={
                   "flex items-center text-sm font-medium " +
@@ -398,9 +400,12 @@ function IvCard({
             </div>
           </div>
 
-          <div className="mx-auto mt-4 inline-flex max-w-full items-center gap-2 overflow-x-auto whitespace-nowrap rounded-full border border-border bg-card/60 px-4 py-1.5 text-xs text-muted-foreground">
-            <Calculator className="h-3 w-3 shrink-0 text-primary" /> Valor intrínseco calculado
-            através de algoritmo próprio derivado do método Discounted Cash Flow
+          <div className="mx-auto mt-4 flex max-w-md items-start gap-2 rounded-2xl border border-border bg-card/60 px-4 py-2.5 text-center text-xs text-muted-foreground sm:max-w-full sm:rounded-full sm:items-center sm:whitespace-nowrap sm:py-1.5">
+            <Calculator className="mt-0.5 h-3 w-3 shrink-0 text-primary sm:mt-0" />
+            <span>
+              Valor intrínseco calculado através de algoritmo próprio derivado do método
+              Discounted Cash Flow
+            </span>
           </div>
         </>
       ) : (
