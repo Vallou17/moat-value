@@ -188,11 +188,11 @@ const defaults = useMemo(
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 pb-20 pt-6 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-[1400px] px-4 pb-20 pt-4 sm:px-6 sm:pt-6 lg:px-10">
       <Button
         variant="ghost"
         size="sm"
-        className="mb-4 -ml-2"
+        className="mb-1 -ml-2"
         onClick={() => navigate({ to: "/" })}
       >
         <ArrowLeft className="mr-1 h-4 w-4" /> Voltar
@@ -232,7 +232,7 @@ const defaults = useMemo(
             <img
               src={data.logoUrl}
               alt={data.companyName}
-              className="order-2 h-16 w-16 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:order-0 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
+              className="order-2 mt-5 h-16 w-16 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:order-0 sm:mt-0 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
@@ -365,7 +365,7 @@ function IvCard({
 
   return (
     <Card
-      className="overflow-hidden p-5"
+      className="overflow-hidden px-5 pb-5 pt-3 sm:pt-5"
       style={
         valid
           ? { background: `linear-gradient(135deg, ${zoneColor}14, transparent 65%)` }
@@ -378,7 +378,7 @@ function IvCard({
 
       {valid ? (
         <>
-          <div className="mt-3 flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-5 flex flex-col items-center gap-4 sm:mt-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-center sm:text-left">
               <div className="text-2xl font-bold sm:text-5xl">{fmtMoney(iv, currency)}</div>
               <div
@@ -400,7 +400,7 @@ function IvCard({
             </div>
           </div>
 
-          <div className="mt-4 max-w-md rounded-2xl border border-border bg-card/60 px-4 py-2.5 text-left text-[11px] text-muted-foreground sm:mx-auto sm:max-w-full sm:rounded-full sm:whitespace-nowrap sm:py-1.5 sm:text-center sm:text-xs">
+          <div className="mt-4 max-w-md rounded-xl border border-border bg-card/60 px-3 py-1.5 text-left text-[9px] leading-snug text-muted-foreground sm:mx-auto sm:max-w-full sm:rounded-full sm:px-4 sm:py-1.5 sm:text-center sm:text-xs sm:leading-normal sm:whitespace-nowrap">
             Valor intrínseco calculado através de algoritmo próprio derivado do método
             Discounted Cash Flow
           </div>
