@@ -13,8 +13,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getMarketSnapshot, getIndexHistory, type Candle } from "@/lib/fmp.functions";
 
-type Range = "1M" | "1A" | "3A" | "5A";
-const RANGES: Range[] = ["1M", "1A", "3A", "5A"];
+type Range = "1M" | "1A" | "3A" | "5A" | "10A";
+const RANGES: Range[] = ["1M", "1A", "3A", "5A", "10A"];
 
 const MONTHS_PT = [
   "Jan.", "Fev.", "Mar.", "Abr.", "Mai.", "Jun.",
@@ -179,11 +179,13 @@ export function SP500Chart() {
       // daily candles on long ranges — sample more sparsely
       if (range === "1A") return sampledTicks(dates, 20);
       if (range === "3A") return sampledTicks(dates, 60);
-      return sampledTicks(dates, 100); // 5A
+      if (range === "5A") return sampledTicks(dates, 100);
+      return sampledTicks(dates, 200); // 10A
     }
     if (range === "1A") return sampledTicks(dates, 4); // every ~4 weeks (~monthly)
     if (range === "3A") return sampledTicks(dates, 12); // every ~12 weeks (~quarterly)
-    return sampledTicks(dates, 20); // 5A: every ~20 weeks
+    if (range === "5A") return sampledTicks(dates, 20); // every ~20 weeks
+    return sampledTicks(dates, 40); // 10A: every ~40 weeks
   }, [chartData, range, useWeekly]);
 
   const yDomain = useMemo<[number, number] | undefined>(() => {
@@ -211,6 +213,7 @@ export function SP500Chart() {
     "1A": "no último ano",
     "3A": "nos últimos 3 anos",
     "5A": "nos últimos 5 anos",
+    "10A": "nos últimos 10 anos",
   };
 
   const up = (sp?.changePercent ?? 0) >= 0;
