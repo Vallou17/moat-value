@@ -164,22 +164,32 @@ async function getCachedLongHistory(symbol: string): Promise<Candle[] | null> {
 }
  
 export const getIndexHistory = createServerFn({ method: "GET" })
-  .inputValidator((d: { symbol: string; range: "1M" | "1A" | "3A" | "5A" }) =>
+  .inputValidator((d: { symbol: string; range: "1M" | "1A" | "3A" | "5A" | "10A" }) =>
     z
       .object({
         symbol: z.string().min(1),
-        range: z.enum(["1M", "1A", "3A", "5A"]),
+        range: z.enum(["1M", "1A", "3A", "5A", "10A"]),
       })
       .parse(d),
   )
   .handler(async ({ data }): Promise<Candle[]> => {
-    const days = data.range === "1M" ? 31 : data.range === "1A" ? 366 : data.range === "3A" ? 366 * 3 : 366 * 5;
+    const days =
+      data.range === "1M"
+        ? 31
+        : data.range === "1A"
+          ? 366
+          : data.range === "3A"
+            ? 366 * 3
+            : data.range === "5A"
+              ? 366 * 5
+              : 366 * 10;
     const cutoff = Date.now() - days * 86400_000;
- 
-    // FMP free/Starter plan only guarantees ~5 years, so for 3A/5A we prefer the
-    // Alpha Vantage + Supabase cache path (20+ years, no extra cost) and fall back to FMP.
+
+    // FMP free/Starter plan only guarantees ~5 years, so for 3A/5A/10A we prefer the
+    // Twelve Data + Supabase cache path (full history since listing, no extra cost) and
+    // fall back to FMP if that's unavailable.
     let all: Candle[] | null = null;
-    if (data.range === "3A" || data.range === "5A") {
+    if (data.range === "3A" || data.range === "5A" || data.range === "10A") {
       all = await getCachedLongHistory(data.symbol);
     }
     if (!all || all.length === 0) {
@@ -196,7 +206,7 @@ export const getIndexHistory = createServerFn({ method: "GET" })
         }))
         .reverse();
     }
- 
+
     return all.filter((r) => new Date(r.date).getTime() >= cutoff);
   });
  
