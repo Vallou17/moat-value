@@ -149,7 +149,7 @@ async function getCachedLongHistory(symbol: string): Promise<Candle[] | null> {
   const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < 24 * 60 * 60_000;
   if (isFresh) return row.candles as Candle[];
  
-  const fresh = await fetchFromAlphaVantage(symbol);
+  const fresh = await fetchFromTwelveData(symbol);
   if (!fresh || fresh.length === 0) {
     // Alpha Vantage failed (rate-limited or symbol unsupported) — serve stale cache if we have any.
     return row ? (row.candles as Candle[]) : null;
