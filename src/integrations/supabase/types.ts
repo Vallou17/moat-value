@@ -35,6 +35,24 @@ export type Database = {
         }
         Relationships: []
       }
+      price_history_cache: {
+        Row: {
+          candles: Json
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          candles: Json
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          candles?: Json
+          symbol?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
