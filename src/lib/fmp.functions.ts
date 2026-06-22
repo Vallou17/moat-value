@@ -99,40 +99,46 @@ export const getMarketSnapshot = createServerFn({ method: "GET" }).handler(
  
 // ---------- Index history (candlestick) ----------
 export type Candle = { date: string; open: number; high: number; low: number; close: number };
- 
-function avKey() {
-  const k = process.env.ALPHA_VANTAGE_API_KEY;
+
+function tdKey() {
+  const k = process.env.TWELVE_DATA_API_KEY;
   if (!k) return null;
   return k;
 }
- 
-// Alpha Vantage free tier gives 20+ years of daily history per symbol, but only 25
-// requests/day total. We cache each symbol's full history in Supabase for 24h so a
-// single Alpha Vantage call per symbol per day covers every visitor.
-async function fetchFromAlphaVantage(symbol: string): Promise<Candle[] | null> {
-  const key = avKey();
+
+// Twelve Data symbol mapping — our FMP-style "^" index symbols don't exist on Twelve Data.
+const TD_SYMBOL_MAP: Record<string, string> = {
+  "^GSPC": "SPX",
+  "^IXIC": "IXIC",
+  "^DJI": "DJI",
+  "^RUT": "RUT",
+};
+
+// Twelve Data's free (Basic) plan returns full daily history since listing for equities/indices
+// (no artificial "5 years" cap like FMP Starter, no "compact=100 points" cap like Alpha Vantage
+// free tier). Limit is 800 requests/day, so we still cache in Supabase for 24h.
+async function fetchFromTwelveData(symbol: string): Promise<Candle[] | null> {
+  const key = tdKey();
   if (!key) return null;
-  // Alpha Vantage uses no "^" prefix for indices and different symbols for some indices.
-  const avSymbol = symbol.replace(/^\^/, "");
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(
-    avSymbol,
-  )}&outputsize=full&apikey=${key}`;
+  const tdSymbol = TD_SYMBOL_MAP[symbol] ?? symbol.replace(/^\^/, "");
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(
+    tdSymbol,
+  )}&interval=1day&outputsize=5000&apikey=${key}`;
   const res = await fetch(url);
   if (!res.ok) return null;
   const json = await res.json();
-  const series = json["Time Series (Daily)"];
-  if (!series || typeof series !== "object") return null;
-  return Object.entries(series)
-    .map(([date, v]: [string, any]) => ({
-      date,
-      open: Number(v["1. open"]),
-      high: Number(v["2. high"]),
-      low: Number(v["3. low"]),
-      close: Number(v["4. close"]),
+  if (json.status === "error" || !Array.isArray(json.values)) return null;
+  return json.values
+    .map((v: any) => ({
+      date: String(v.datetime),
+      open: Number(v.open),
+      high: Number(v.high),
+      low: Number(v.low),
+      close: Number(v.close),
     }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a: Candle, b: Candle) => a.date.localeCompare(b.date));
 }
- 
+
 async function getCachedLongHistory(symbol: string): Promise<Candle[] | null> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: row } = await supabaseAdmin
@@ -140,20 +146,20 @@ async function getCachedLongHistory(symbol: string): Promise<Candle[] | null> {
     .select("candles, updated_at")
     .eq("symbol", symbol)
     .maybeSingle();
- 
+
   const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < 24 * 60 * 60_000;
   if (isFresh) return row.candles as Candle[];
- 
-  const fresh = await fetchFromAlphaVantage(symbol);
+
+  const fresh = await fetchFromTwelveData(symbol);
   if (!fresh || fresh.length === 0) {
-    // Alpha Vantage failed (rate-limited or symbol unsupported) — serve stale cache if we have any.
+    // Twelve Data failed (rate-limited or symbol unsupported) — serve stale cache if we have any.
     return row ? (row.candles as Candle[]) : null;
   }
- 
+
   await supabaseAdmin
     .from("price_history_cache")
     .upsert({ symbol, candles: fresh, updated_at: new Date().toISOString() }, { onConflict: "symbol" });
- 
+
   return fresh;
 }
  
