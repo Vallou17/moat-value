@@ -100,6 +100,63 @@ export const getMarketSnapshot = createServerFn({ method: "GET" }).handler(
 // ---------- Index history (candlestick) ----------
 export type Candle = { date: string; open: number; high: number; low: number; close: number };
  
+function avKey() {
+  const k = process.env.ALPHA_VANTAGE_API_KEY;
+  if (!k) return null;
+  return k;
+}
+ 
+// Alpha Vantage free tier gives 20+ years of daily history per symbol, but only 25
+// requests/day total. We cache each symbol's full history in Supabase for 24h so a
+// single Alpha Vantage call per symbol per day covers every visitor.
+async function fetchFromAlphaVantage(symbol: string): Promise<Candle[] | null> {
+  const key = avKey();
+  if (!key) return null;
+  // Alpha Vantage uses no "^" prefix for indices and different symbols for some indices.
+  const avSymbol = symbol.replace(/^\^/, "");
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(
+    avSymbol,
+  )}&outputsize=full&apikey=${key}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const json = await res.json();
+  const series = json["Time Series (Daily)"];
+  if (!series || typeof series !== "object") return null;
+  return Object.entries(series)
+    .map(([date, v]: [string, any]) => ({
+      date,
+      open: Number(v["1. open"]),
+      high: Number(v["2. high"]),
+      low: Number(v["3. low"]),
+      close: Number(v["4. close"]),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+ 
+async function getCachedLongHistory(symbol: string): Promise<Candle[] | null> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row } = await supabaseAdmin
+    .from("price_history_cache")
+    .select("candles, updated_at")
+    .eq("symbol", symbol)
+    .maybeSingle();
+ 
+  const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < 24 * 60 * 60_000;
+  if (isFresh) return row.candles as Candle[];
+ 
+  const fresh = await fetchFromAlphaVantage(symbol);
+  if (!fresh || fresh.length === 0) {
+    // Alpha Vantage failed (rate-limited or symbol unsupported) — serve stale cache if we have any.
+    return row ? (row.candles as Candle[]) : null;
+  }
+ 
+  await supabaseAdmin
+    .from("price_history_cache")
+    .upsert({ symbol, candles: fresh, updated_at: new Date().toISOString() }, { onConflict: "symbol" });
+ 
+  return fresh;
+}
+ 
 export const getIndexHistory = createServerFn({ method: "GET" })
   .inputValidator((d: { symbol: string; range: "1M" | "1A" | "3A" | "5A" }) =>
     z
@@ -110,21 +167,31 @@ export const getIndexHistory = createServerFn({ method: "GET" })
       .parse(d),
   )
   .handler(async ({ data }): Promise<Candle[]> => {
-    const all = await fmp<any[]>(
-      `/historical-price-eod/full?symbol=${encodeURIComponent(data.symbol)}`,
-    );
     const days = data.range === "1M" ? 31 : data.range === "1A" ? 366 : data.range === "3A" ? 366 * 3 : 366 * 5;
     const cutoff = Date.now() - days * 86400_000;
-    return (all ?? [])
-      .filter((r) => new Date(r.date).getTime() >= cutoff)
-      .map((r) => ({
-        date: String(r.date),
-        open: Number(r.open),
-        high: Number(r.high),
-        low: Number(r.low),
-        close: Number(r.close),
-      }))
-      .reverse();
+ 
+    // FMP free/Starter plan only guarantees ~5 years, so for 3A/5A we prefer the
+    // Alpha Vantage + Supabase cache path (20+ years, no extra cost) and fall back to FMP.
+    let all: Candle[] | null = null;
+    if (data.range === "3A" || data.range === "5A") {
+      all = await getCachedLongHistory(data.symbol);
+    }
+    if (!all || all.length === 0) {
+      const raw = await fmp<any[]>(
+        `/historical-price-eod/full?symbol=${encodeURIComponent(data.symbol)}`,
+      );
+      all = (raw ?? [])
+        .map((r) => ({
+          date: String(r.date),
+          open: Number(r.open),
+          high: Number(r.high),
+          low: Number(r.low),
+          close: Number(r.close),
+        }))
+        .reverse();
+    }
+ 
+    return all.filter((r) => new Date(r.date).getTime() >= cutoff);
   });
  
 // ---------- Market news (Yahoo Finance RSS — FMP news endpoint restricted, Google News blocks article links) ----------
