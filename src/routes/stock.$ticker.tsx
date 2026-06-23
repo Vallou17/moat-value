@@ -22,6 +22,7 @@ import {
   YAxis,
 } from "recharts";
 import { getStockData, type StockData } from "@/lib/fmp.functions";
+import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { computeDcf, discountPremiumPct } from "@/lib/dcf";
 import { fmtMoney, fmtPct, fmtCompact, pushRecent } from "@/lib/format";
 import { Card } from "@/components/ui/card";
@@ -262,6 +263,16 @@ const defaults = useMemo(
           label="Valor Intrínseco"
           iv={ivAdjusted.intrinsicValuePerShare}
           price={data.price}
+          currency={data.currency}
+        />
+      </div>
+
+      {/* Price history chart */}
+      <div className="mt-6">
+        <PriceHistoryChart
+          symbol={data.ticker}
+          currentPrice={data.price}
+          currentChangePercent={data.changePercent}
           currency={data.currency}
         />
       </div>
