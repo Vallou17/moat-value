@@ -1,0 +1,340 @@
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  ComposedChart,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Bar,
+} from "recharts";
+import { ArrowDown, ArrowUp, LineChart } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { getIndexHistory, type Candle } from "@/lib/fmp.functions";
+
+type Range = "1M" | "1A" | "3A" | "5A" | "10A";
+const RANGES: Range[] = ["1M", "1A", "3A", "5A", "10A"];
+
+const MONTHS_PT = [
+  "Jan.", "Fev.", "Mar.", "Abr.", "Mai.", "Jun.",
+  "Jul.", "Ago.", "Set.", "Out.", "Nov.", "Dez.",
+];
+
+// "2026-06-15" -> for 1M: "01 Jun." | for 1A/3A/5A/10A: "Jun. 26"
+function formatAxisDate(dateStr: string, range: Range): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const month = MONTHS_PT[d.getMonth()];
+  if (range === "1M") {
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${day} ${month}`;
+  }
+  const yy = String(d.getFullYear()).slice(2);
+  return `${month} ${yy}`;
+}
+
+// ISO week key, e.g. "2026-W25" — weeks run Monday to Sunday.
+function isoWeekKey(d: Date): string {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  date.setUTCDate(date.getUTCDate() - dayNum + 3); // Thursday of this week
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const week =
+    1 +
+    Math.round(
+      ((date.getTime() - firstThursday.getTime()) / 86400000 -
+        3 +
+        ((firstThursday.getUTCDay() + 6) % 7)) /
+        7,
+    );
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+// Aggregate daily candles into one candle per ISO week (Mon–Sun).
+function aggregateWeekly(daily: Candle[]): Candle[] {
+  const byWeek = new Map<string, Candle[]>();
+  for (const c of daily) {
+    const key = isoWeekKey(new Date(c.date));
+    if (!byWeek.has(key)) byWeek.set(key, []);
+    byWeek.get(key)!.push(c);
+  }
+  const weeks = Array.from(byWeek.keys()).sort();
+  return weeks.map((key) => {
+    const group = byWeek.get(key)!.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const open = group[0].open;
+    const close = group[group.length - 1].close;
+    const high = Math.max(...group.map((c) => c.high));
+    const low = Math.min(...group.map((c) => c.low));
+    return { date: group[0].date, open, close, high, low };
+  });
+}
+
+// Pick every Nth tick value from a sorted list of dates, always including the first and last.
+function sampledTicks(dates: string[], step: number): string[] {
+  if (dates.length === 0) return [];
+  const picked: string[] = [];
+  for (let i = 0; i < dates.length; i += step) picked.push(dates[i]);
+  if (picked[picked.length - 1] !== dates[dates.length - 1]) {
+    picked.push(dates[dates.length - 1]);
+  }
+  return picked;
+}
+
+function fmtNum(n: number): string {
+  return new Intl.NumberFormat("pt-PT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+// Custom candlestick shape. Recharts passes the bar's own pixel rect:
+//   props.y = scale(payload.high), props.y+props.height = scale(domainMin)
+// We invert that to project any price → pixel y.
+function makeCandlestick(domain: [number, number] | undefined) {
+  return function Candlestick(props: any) {
+    const { x, y, width, height, payload } = props;
+    if (!payload || !domain || height <= 0) return null;
+    const { open, close, high, low } = payload as Candle;
+    const [domainMin] = domain;
+    const denom = high - domainMin;
+    if (denom <= 0) return null;
+    const pxPerUnit = height / denom;
+    const project = (v: number) => y + (high - v) * pxPerUnit;
+    const up = close >= open;
+    const color = up ? "var(--success)" : "var(--destructive)";
+    const yHigh = project(high);
+    const yLow = project(low);
+    const yOpen = project(open);
+    const yClose = project(close);
+    const bodyTop = Math.min(yOpen, yClose);
+    const bodyH = Math.max(1, Math.abs(yClose - yOpen));
+    const cx = x + width / 2;
+    const bodyW = Math.max(1, width * 0.7);
+    return (
+      <g>
+        <line x1={cx} x2={cx} y1={yHigh} y2={yLow} stroke={color} strokeWidth={1} />
+        <rect
+          x={cx - bodyW / 2}
+          y={bodyTop}
+          width={bodyW}
+          height={bodyH}
+          fill={color}
+          stroke={color}
+        />
+      </g>
+    );
+  };
+}
+
+function ChartTooltip({ active, payload, range }: any) {
+  if (!active || !payload?.length) return null;
+  const c = payload[0].payload as Candle;
+  const variation = c.open ? ((c.close - c.open) / c.open) * 100 : 0;
+  const up = variation >= 0;
+  return (
+    <div className="rounded-md border border-border bg-popover px-3 py-2 text-xs shadow-md">
+      <div className="font-medium">{formatAxisDate(c.date, range)}</div>
+      <div className={`mt-0.5 font-medium ${up ? "text-success" : "text-destructive"}`}>
+        {(up ? "+" : "") + variation.toFixed(2)}%
+      </div>
+    </div>
+  );
+}
+
+export function PriceHistoryChart({
+  symbol,
+  currentPrice,
+  currentChangePercent,
+  currency = "USD",
+}: {
+  symbol: string;
+  currentPrice?: number;
+  currentChangePercent?: number;
+  currency?: string;
+}) {
+  const [range, setRange] = useState<Range>("1A");
+  const [granularity, setGranularity] = useState<"daily" | "weekly">("weekly");
+
+  const history = useQuery({
+    queryKey: ["index-history", symbol, range],
+    queryFn: () => getIndexHistory({ data: { symbol, range } }),
+    staleTime: 30 * 60_000,
+    gcTime: 60 * 60_000,
+  });
+
+  const useWeekly = range !== "1M" && granularity === "weekly";
+
+  const chartData = useMemo<Candle[]>(() => {
+    const d = history.data;
+    if (!d || d.length === 0) return [];
+    if (range === "1M") return d;
+    return useWeekly ? aggregateWeekly(d) : d;
+  }, [history.data, range, useWeekly]);
+
+  const xTicks = useMemo(() => {
+    const dates = chartData.map((c) => c.date);
+    if (range === "1M") return sampledTicks(dates, 5); // every ~5 days
+    if (!useWeekly) {
+      if (range === "1A") return sampledTicks(dates, 20);
+      if (range === "3A") return sampledTicks(dates, 60);
+      if (range === "5A") return sampledTicks(dates, 100);
+      return sampledTicks(dates, 200); // 10A
+    }
+    if (range === "1A") return sampledTicks(dates, 4); // every ~4 weeks (~monthly)
+    if (range === "3A") return sampledTicks(dates, 12); // every ~12 weeks (~quarterly)
+    if (range === "5A") return sampledTicks(dates, 20); // every ~20 weeks
+    return sampledTicks(dates, 40); // 10A: every ~40 weeks
+  }, [chartData, range, useWeekly]);
+
+  const yDomain = useMemo<[number, number] | undefined>(() => {
+    if (chartData.length === 0) return undefined;
+    let lo = Infinity, hi = -Infinity;
+    for (const c of chartData) {
+      if (c.low < lo) lo = c.low;
+      if (c.high > hi) hi = c.high;
+    }
+    const pad = (hi - lo) * 0.05;
+    return [Math.floor(lo - pad), Math.ceil(hi + pad)];
+  }, [chartData]);
+
+  // % change from the first to the last candle in the selected period.
+  const periodVariation = useMemo(() => {
+    if (chartData.length < 2) return null;
+    const first = chartData[0].open;
+    const last = chartData[chartData.length - 1].close;
+    if (!first) return null;
+    return ((last - first) / first) * 100;
+  }, [chartData]);
+
+  const RANGE_LABELS: Record<Range, string> = {
+    "1M": "no último mês",
+    "1A": "no último ano",
+    "3A": "nos últimos 3 anos",
+    "5A": "nos últimos 5 anos",
+    "10A": "nos últimos 10 anos",
+  };
+
+  const up = (currentChangePercent ?? 0) >= 0;
+  const hasQuote = currentPrice != null;
+
+  return (
+    <Card className="flex h-full flex-col p-4 sm:p-5">
+      <div className="mb-3 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
+            <LineChart className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Evolução da
+            cotação
+          </h2>
+          {hasQuote ? (
+            <div className="mt-1 flex flex-wrap items-baseline gap-2">
+              <span className="text-xl font-bold sm:text-2xl">
+                {fmtNum(currentPrice!)} {currency}
+              </span>
+              {currentChangePercent != null && (
+                <span
+                  className={`inline-flex items-center gap-0.5 text-xs font-medium sm:text-sm ${
+                    up ? "text-success" : "text-destructive"
+                  }`}
+                >
+                  {up ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
+                  {(currentChangePercent >= 0 ? "+" : "") + currentChangePercent.toFixed(2)}% hoje
+                </span>
+              )}
+              {periodVariation !== null && (
+                <span
+                  className={`inline-flex items-center gap-0.5 text-xs font-medium sm:text-sm ${
+                    periodVariation >= 0 ? "text-success" : "text-destructive"
+                  }`}
+                >
+                  {periodVariation >= 0 ? (
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  )}
+                  {(periodVariation >= 0 ? "+" : "") + periodVariation.toFixed(2)}%{" "}
+                  {RANGE_LABELS[range]}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1 h-7 w-32 animate-pulse rounded bg-muted" />
+          )}
+        </div>
+        <div className="flex flex-row items-center justify-between gap-2 sm:flex-col sm:items-end">
+          <div className="flex gap-1">
+            {RANGES.map((r) => (
+              <Button
+                key={r}
+                variant={range === r ? "default" : "ghost"}
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setRange(r)}
+              >
+                {r}
+              </Button>
+            ))}
+          </div>
+          {range !== "1M" && (
+            <div className="flex gap-1">
+              <Button
+                variant={granularity === "daily" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setGranularity("daily")}
+              >
+                Dia
+              </Button>
+              <Button
+                variant={granularity === "weekly" ? "secondary" : "ghost"}
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setGranularity("weekly")}
+              >
+                Semana
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="h-[260px] w-full sm:h-[360px]">
+        {history.isLoading ? (
+          <div className="h-full w-full animate-pulse rounded bg-muted/40" />
+        ) : history.isError || chartData.length === 0 ? (
+          <div className="grid h-full place-items-center text-sm text-muted-foreground">
+            Dados de cotação indisponíveis
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart
+              data={chartData}
+              margin={{ top: 10, right: 0, left: 0, bottom: 0 }}
+              barCategoryGap="20%"
+            >
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                tickFormatter={(d) => formatAxisDate(String(d), range)}
+                ticks={xTicks}
+                minTickGap={20}
+              />
+              <YAxis
+                domain={yDomain ?? ["auto", "auto"]}
+                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                tickFormatter={(v) => Math.round(Number(v)).toLocaleString("pt-PT")}
+                width={44}
+                orientation="right"
+              />
+              <Tooltip
+                content={<ChartTooltip range={range} />}
+                cursor={{ stroke: "var(--border)" }}
+              />
+              <Bar dataKey="high" shape={makeCandlestick(yDomain) as any} isAnimationActive={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </Card>
+  );
+}
