@@ -406,6 +406,13 @@ function IvCard({
                 Cotação atual {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor
                 intrínseco
               </div>
+              <div className="mt-2 flex items-start gap-1.5 text-left text-[11px] leading-snug text-muted-foreground sm:text-xs">
+                <Info className="mt-[1px] h-3 w-3 shrink-0" />
+                <span>
+                  Valor intrínseco calculado através de algoritmo próprio derivado do método
+                  Discounted Cash Flow
+                </span>
+              </div>
             </div>
             <div className="flex flex-col items-center">
               <Gauge t={gaugeT} color={zoneColor} />
@@ -418,13 +425,6 @@ function IvCard({
             </div>
           </div>
 
-          <div className="mt-4 flex items-start gap-2 text-left text-[11px] leading-snug text-muted-foreground sm:text-xs">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span>
-              Valor intrínseco calculado através de algoritmo próprio derivado do método
-              Discounted Cash Flow
-            </span>
-          </div>
 
           <Collapsible className="mt-4">
             <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border/60 bg-card/40 px-4 py-3 text-left">
@@ -439,9 +439,9 @@ function IvCard({
             <CollapsibleContent className="rounded-b-lg border border-t-0 border-border/60 bg-card/40 p-4">
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Field label="Taxa de Desconto (%)" value={discountRate} step={0.1} onChange={onDiscountRateChange} />
-                <Field label="Crescimento Free Cash Flow Anos 1–5 (%)" value={g1} step={0.1} onChange={onG1Change} />
-                <Field label="Crescimento Free Cash Flow Anos 6–10 (%)" value={g2} step={0.1} onChange={onG2Change} />
-                <Field label="Crescimento Free Cash Flow Anos 11–20 (%)" value={g3} step={0.1} onChange={onG3Change} />
+                <Field label="Crescimento do Free Cash Flow nos anos 1–5 (%)" value={g1} step={0.1} onChange={onG1Change} />
+                <Field label="Crescimento do Free Cash Flow nos anos 6–10 (%)" value={g2} step={0.1} onChange={onG2Change} />
+                <Field label="Crescimento do Free Cash Flow nos anos 11–20 (%)" value={g3} step={0.1} onChange={onG3Change} />
               </div>
               <Button variant="ghost" size="sm" className="mt-4" onClick={onReset}>
                 <RotateCcw className="mr-2 h-3.5 w-3.5" /> Repor valores originais
