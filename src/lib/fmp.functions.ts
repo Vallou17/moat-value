@@ -381,6 +381,61 @@ async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<numbe
   return out;
 }
 
+// Balance sheet items (debt, cash) are point-in-time "instant" facts, not period totals.
+// We want the single most recent reported value, from any filing (10-K or 10-Q).
+async function fetchEdgarLatestInstant(cik: string, tags: string[]): Promise<number | null> {
+  for (const tag of tags) {
+    try {
+      const res = await fetch(
+        `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
+        { headers: EDGAR_HEADERS },
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const usd = json?.units?.USD;
+      if (!Array.isArray(usd) || usd.length === 0) continue;
+      const sorted = usd.slice().sort((a: any, b: any) => String(b.end).localeCompare(String(a.end)));
+      const latest = sorted[0];
+      if (latest && latest.val != null) return Number(latest.val);
+    } catch {
+      // try next tag
+    }
+  }
+  return null;
+}
+
+const LONG_TERM_DEBT_TAGS = ["LongTermDebtNoncurrent", "LongTermDebt"];
+const SHORT_TERM_DEBT_TAGS = [
+  "LongTermDebtCurrent",
+  "ShortTermBorrowings",
+  "DebtCurrent",
+];
+const CASH_TAGS = [
+  "CashAndCashEquivalentsAtCarryingValue",
+  "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+];
+const SHARES_OUTSTANDING_TAGS = ["CommonStockSharesOutstanding"];
+
+type EdgarBalanceSnapshot = {
+  totalDebt: number | null;
+  cash: number | null;
+  sharesOutstanding: number | null;
+};
+
+async function fetchEdgarBalanceSnapshot(ticker: string): Promise<EdgarBalanceSnapshot | null> {
+  const cik = await getCikForTicker(ticker);
+  if (!cik) return null;
+  const [longTermDebt, shortTermDebt, cash, shares] = await Promise.all([
+    fetchEdgarLatestInstant(cik, LONG_TERM_DEBT_TAGS),
+    fetchEdgarLatestInstant(cik, SHORT_TERM_DEBT_TAGS),
+    fetchEdgarLatestInstant(cik, CASH_TAGS),
+    fetchEdgarLatestInstant(cik, SHARES_OUTSTANDING_TAGS),
+  ]);
+  const totalDebt =
+    longTermDebt != null || shortTermDebt != null ? (longTermDebt ?? 0) + (shortTermDebt ?? 0) : null;
+  return { totalDebt, cash, sharesOutstanding: shares };
+}
+
 type EdgarHistory = { year: number; revenue: number; fcf: number }[];
 
 async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | null> {
@@ -486,22 +541,29 @@ export const getStockData = createServerFn({ method: "GET" })
     const fcfAdjusted = operatingCashFlow - meanCapex4y;
  
 const rawTotalDebt = balance0.totalDebt;
-    const totalDebt =
+    const fmpTotalDebt =
       typeof rawTotalDebt === "number" && rawTotalDebt > 0
         ? rawTotalDebt
         : typeof rawTotalDebt === "string" && Number(rawTotalDebt) > 0
           ? Number(rawTotalDebt)
           : Number(balance0.shortTermDebt ?? 0) + Number(balance0.longTermDebt ?? 0);
-    const cashBs = Number(
+    const fmpCashBs = Number(
       balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
     );
- 
+
+    // Prefer SEC EDGAR for debt/cash when available — it's the free, official, primary source
+    // and avoids relying on FMP's pre-aggregated totalDebt field (which we've seen be
+    // inconsistent in the past). Falls back to FMP's figures for non-US filers or on failure.
+    const edgarBalance = await fetchEdgarBalanceSnapshot(t).catch(() => null);
+    const totalDebt = edgarBalance?.totalDebt ?? fmpTotalDebt;
+    const cashBs = edgarBalance?.cash ?? fmpCashBs;
+
     const sharesOutstanding =
       Number(quote.marketCap && quote.price ? quote.marketCap / quote.price : 0) ||
       Number(profile.mktCap && quote.price ? profile.mktCap / quote.price : 0) ||
       Number(keyMetricsArr?.[0]?.sharesOutstanding) ||
       Number(quote.sharesOutstanding);
- 
+
     if (!sharesOutstanding) throw new Error("Número de ações indisponível");
  
    // Growth rate from analyst estimates: avg of next ~5y EPS growth
