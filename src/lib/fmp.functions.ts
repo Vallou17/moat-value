@@ -353,6 +353,7 @@ const REVENUE_TAGS = [
 const OPERATING_CF_TAGS = ["NetCashProvidedByUsedInOperatingActivities"];
 const CAPEX_TAGS = [
   "PaymentsToAcquirePropertyPlantAndEquipment",
+  "PaymentsToAcquireProductiveAssets", // Amazon (and a few others) use this since FY2016
   "PaymentsForCapitalImprovements",
 ];
 
@@ -449,6 +450,10 @@ async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | nu
     fetchEdgarConcept(cik, CAPEX_TAGS),
   ]);
   if (revenue.size === 0) return null;
+  // If we found revenue but no CAPEX at all, none of our known tags matched this filer's
+  // taxonomy — silently treating missing CAPEX as 0 would inflate FCF (= OperatingCF - 0).
+  // Safer to bail out and let the caller fall back to FMP's pre-calculated FCF instead.
+  if (capex.size === 0) return null;
 
   const years = Array.from(revenue.keys()).sort((a, b) => a - b);
   const last10 = years.slice(-10);
