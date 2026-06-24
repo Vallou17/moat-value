@@ -318,6 +318,119 @@ async function getCachedFundamentals(ticker: string): Promise<RawFundamentals> {
 }
 
 
+// ---------- SEC EDGAR (free, official, no API key, 10+ years of history) ----------
+// Used only to extend the Revenue/FCF history chart beyond the ~5 years FMP's plan allows.
+// All other figures (current FCF, debt, cash, shares, growth estimates) still come from FMP.
+const EDGAR_TTL_MS = 30 * 24 * 60 * 60_000; // 30 days — annual filings barely change
+const EDGAR_HEADERS = { "User-Agent": "ValueScope contact@valuescope.app" };
+
+let tickerToCikCache: Record<string, string> | null = null;
+async function getCikForTicker(ticker: string): Promise<string | null> {
+  if (!tickerToCikCache) {
+    const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
+      headers: EDGAR_HEADERS,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const map: Record<string, string> = {};
+    for (const row of Object.values(json) as any[]) {
+      if (row?.ticker) map[String(row.ticker).toUpperCase()] = String(row.cik_str).padStart(10, "0");
+    }
+    tickerToCikCache = map;
+  }
+  return tickerToCikCache[ticker.toUpperCase()] ?? null;
+}
+
+// Different companies tag the same line item with different XBRL concepts — try each in order.
+const REVENUE_TAGS = [
+  "Revenues",
+  "RevenueFromContractWithCustomerExcludingAssessedTax",
+  "RevenueFromContractWithCustomerIncludingAssessedTax",
+  "SalesRevenueNet",
+];
+const OPERATING_CF_TAGS = ["NetCashProvidedByUsedInOperatingActivities"];
+const CAPEX_TAGS = [
+  "PaymentsToAcquirePropertyPlantAndEquipment",
+  "PaymentsForCapitalImprovements",
+];
+
+async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<number, number>> {
+  // Returns a map of fiscal year -> value, using the first tag that has data for each year.
+  const out = new Map<number, number>();
+  for (const tag of tags) {
+    try {
+      const res = await fetch(
+        `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
+        { headers: EDGAR_HEADERS },
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const usd = json?.units?.USD;
+      if (!Array.isArray(usd)) continue;
+      for (const entry of usd) {
+        // Only full-year 10-K figures, one per fiscal year (skip quarterly 10-Qs).
+        if (entry.form !== "10-K" || entry.fp !== "FY") continue;
+        const fy = Number(entry.fy);
+        if (!fy) continue;
+        if (!out.has(fy)) out.set(fy, Number(entry.val));
+      }
+    } catch {
+      // try next tag
+    }
+  }
+  return out;
+}
+
+type EdgarHistory = { year: number; revenue: number; fcf: number }[];
+
+async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | null> {
+  const cik = await getCikForTicker(ticker);
+  if (!cik) return null;
+  const [revenue, opCf, capex] = await Promise.all([
+    fetchEdgarConcept(cik, REVENUE_TAGS),
+    fetchEdgarConcept(cik, OPERATING_CF_TAGS),
+    fetchEdgarConcept(cik, CAPEX_TAGS),
+  ]);
+  if (revenue.size === 0) return null;
+
+  const years = Array.from(revenue.keys()).sort((a, b) => a - b);
+  const last10 = years.slice(-10);
+  return last10.map((year) => {
+    const op = opCf.get(year) ?? 0;
+    const cap = Math.abs(capex.get(year) ?? 0);
+    return { year, revenue: revenue.get(year) ?? 0, fcf: op - cap };
+  });
+}
+
+async function getCachedEdgarHistory(ticker: string): Promise<EdgarHistory | null> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row } = await supabaseAdmin
+    .from("edgar_history_cache")
+    .select("history, updated_at")
+    .eq("ticker", ticker)
+    .maybeSingle();
+
+  const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < EDGAR_TTL_MS;
+  if (isFresh) return row.history as EdgarHistory;
+
+  try {
+    const fresh = await fetchEdgarHistoryFresh(ticker);
+    if (fresh && fresh.length > 0) {
+      await supabaseAdmin
+        .from("edgar_history_cache")
+        .upsert(
+          { ticker, history: fresh, updated_at: new Date().toISOString() },
+          { onConflict: "ticker" },
+        );
+      return fresh;
+    }
+    return row ? (row.history as EdgarHistory) : null;
+  } catch {
+    return row ? (row.history as EdgarHistory) : null;
+  }
+}
+
+
 export type StockData = {
   ticker: string;
   companyName: string;
@@ -434,7 +547,7 @@ const rawTotalDebt = balance0.totalDebt;
     if (freeCashFlow < 0)
       warnings.push("FCF negativo — o cálculo pode não ser fiável.");
  
-    const history = incomeArr
+    const fmpHistory = incomeArr
       .slice()
       .reverse()
       .map((inc) => {
@@ -447,6 +560,11 @@ const rawTotalDebt = balance0.totalDebt;
         };
       })
       .filter((h) => h.year > 0);
+
+    // Try SEC EDGAR first for up to 10 years of free, official history (US filers only).
+    // Falls back to the ~5 years FMP's current plan provides for non-US tickers or if EDGAR fails.
+    const edgarHistory = await getCachedEdgarHistory(t).catch(() => null);
+    const history = edgarHistory && edgarHistory.length > fmpHistory.length ? edgarHistory : fmpHistory;
  
     return {
       ticker: t,
