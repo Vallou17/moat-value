@@ -298,7 +298,12 @@ const defaults = useMemo(
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
             <MetricGroup title="Valuation">
               <MetricRow label="Market Cap" value={data.marketCap != null ? fmtCompact(data.marketCap, data.currency) : "—"} />
-              <MetricRow label="P/E" value={data.peRatio != null ? data.peRatio.toFixed(2) : "—"} />
+              <MetricRow
+                label="P/E (TTM | NTM)"
+                value={`${data.peRatio != null ? data.peRatio.toFixed(2) : "—"} | ${
+                  data.peNtm != null ? data.peNtm.toFixed(2) : "—"
+                }`}
+              />
               <MetricRow label="Price to Sales" value={fmtRatio(data.priceToSales)} />
               <MetricRow label="EV to EBITDA" value={fmtRatio(data.evToEBITDA)} />
               <MetricRow label="Price to Book" value={fmtRatio(data.priceToBook)} />
