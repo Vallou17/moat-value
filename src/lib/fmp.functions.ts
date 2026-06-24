@@ -358,8 +358,8 @@ const CAPEX_TAGS = [
 ];
 
 async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<number, number>> {
-  // Returns a map of fiscal year -> value, using the first tag that has data for each year.
-  const out = new Map<number, number>();
+  // Returns a map of period-year -> value, using the first tag that has data for each year.
+  const out = new Map<number, { val: number; filed: string }>();
   for (const tag of tags) {
     try {
       const res = await fetch(
@@ -371,17 +371,30 @@ async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<numbe
       const usd = json?.units?.USD;
       if (!Array.isArray(usd)) continue;
       for (const entry of usd) {
-        // Only full-year 10-K figures, one per fiscal year (skip quarterly 10-Qs).
+        // Only full-year 10-K figures (skip quarterly 10-Qs).
+        // IMPORTANT: the `fy` field is the *filing's* fiscal year label, not necessarily the
+        // year the figure covers — a 10-K commonly repeats prior-year comparatives under the
+        // same `fy`. The period's `end` date is the reliable way to know which year a duration
+        // fact actually belongs to.
         if (entry.form !== "10-K" || entry.fp !== "FY") continue;
-        const fy = Number(entry.fy);
-        if (!fy) continue;
-        if (!out.has(fy)) out.set(fy, Number(entry.val));
+        const end = String(entry.end ?? "");
+        const year = Number(end.slice(0, 4));
+        if (!year) continue;
+        const filed = String(entry.filed ?? "");
+        const existing = out.get(year);
+        // Companies sometimes restate prior years in later filings — keep the most recently
+        // filed value for each year rather than just the first one encountered.
+        if (!existing || filed > existing.filed) {
+          out.set(year, { val: Number(entry.val), filed });
+        }
       }
     } catch {
       // try next tag
     }
   }
-  return out;
+  const simple = new Map<number, number>();
+  for (const [year, { val }] of out) simple.set(year, val);
+  return simple;
 }
 
 // Balance sheet items (debt, cash) are point-in-time "instant" facts, not period totals.
