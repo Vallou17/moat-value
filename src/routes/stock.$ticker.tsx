@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowDownRight,
@@ -292,20 +292,73 @@ const defaults = useMemo(
       <section className="mt-6">
         <Card className="p-4 sm:p-5">
           <h2 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
-            <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Métricas
-            Financeiras
+            <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Métricas e
+            Indicadores
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <Metric label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
-            <Metric label="Operating Cash Flow" value={fmtCompact(data.operatingCashFlow, data.currency)} />
-            <Metric label="CAPEX (último ano)" value={fmtCompact(data.capex, data.currency)} />
-            <Metric label="CAPEX Médio 4A" value={fmtCompact(data.meanCapex4y, data.currency)} />
-            <Metric label="FCF Ajustado" value={fmtCompact(data.fcfAdjusted, data.currency)} />
-            <Metric label="Dívida Total" value={fmtCompact(data.totalDebt, data.currency)} />
-            <Metric label="Caixa & Equivalentes" value={fmtCompact(data.cash, data.currency)} />
-            <Metric label="Ações em Circulação" value={fmtCompact(data.sharesOutstanding, data.currency).replace(/[^\d.,KMBT]/g, "")} />
-            <Metric label="P/E" value={data.peRatio != null ? data.peRatio.toFixed(2) : "—"} />
-            <Metric label="ROIC" value={data.roic != null ? fmtPct(data.roic * 100, 1) : "—"} />
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
+            <MetricGroup title="Valuation">
+              <MetricRow label="Market Cap" value={data.marketCap != null ? fmtCompact(data.marketCap, data.currency) : "—"} />
+              <MetricRow label="P/E" value={data.peRatio != null ? data.peRatio.toFixed(2) : "—"} />
+              <MetricRow label="Price to Sales" value={fmtRatio(data.priceToSales)} />
+              <MetricRow label="EV to EBITDA" value={fmtRatio(data.evToEBITDA)} />
+              <MetricRow label="Price to Book" value={fmtRatio(data.priceToBook)} />
+            </MetricGroup>
+
+            <MetricGroup title="Cash Flow">
+              <MetricRow label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
+              <MetricRow
+                label="FCF Yield"
+                value={data.freeCashFlowYield != null ? fmtPct(data.freeCashFlowYield * 100, 2) : "—"}
+              />
+              <MetricRow
+                label="FCF por Ação"
+                value={data.freeCashFlowPerShare != null ? fmtMoney(data.freeCashFlowPerShare, data.currency) : "—"}
+              />
+              <MetricRow label="CAPEX (último ano)" value={fmtCompact(data.capex, data.currency)} />
+              <MetricRow label="CAPEX Médio 4A" value={fmtCompact(data.meanCapex4y, data.currency)} />
+              <MetricRow label="FCF Ajustado" value={fmtCompact(data.fcfAdjusted, data.currency)} />
+            </MetricGroup>
+
+            <MetricGroup title="Margins & Growth">
+              <MetricRow
+                label="Profit Margin"
+                value={data.netProfitMargin != null ? fmtPct(data.netProfitMargin * 100, 2) : "—"}
+              />
+              <MetricRow
+                label="Operating Margin"
+                value={data.operatingProfitMargin != null ? fmtPct(data.operatingProfitMargin * 100, 2) : "—"}
+              />
+              <MetricRow
+                label="Receita (YoY)"
+                value={data.revenueGrowthYoY != null ? fmtPct(data.revenueGrowthYoY * 100, 2) : "—"}
+              />
+              <MetricRow
+                label="Lucro Líquido (YoY)"
+                value={data.netIncomeGrowthYoY != null ? fmtPct(data.netIncomeGrowthYoY * 100, 2) : "—"}
+              />
+              <MetricRow label="ROIC" value={data.roic != null ? fmtPct(data.roic * 100, 1) : "—"} />
+            </MetricGroup>
+
+            <MetricGroup title="Balance">
+              <MetricRow label="Caixa & Equivalentes" value={fmtCompact(data.cash, data.currency)} />
+              <MetricRow label="Dívida Total" value={fmtCompact(data.totalDebt, data.currency)} />
+              <MetricRow label="Dívida Líquida" value={fmtCompact(data.totalDebt - data.cash, data.currency)} />
+              <MetricRow
+                label="Ações em Circulação"
+                value={fmtCompact(data.sharesOutstanding, data.currency).replace(/[^\d.,KMBT]/g, "")}
+              />
+            </MetricGroup>
+
+            <MetricGroup title="Dividend">
+              <MetricRow
+                label="Dividend Yield"
+                value={data.dividendYield != null ? fmtPct(data.dividendYield * 100, 2) : "—"}
+              />
+              <MetricRow
+                label="Payout Ratio"
+                value={data.dividendPayoutRatio != null ? fmtPct(data.dividendPayoutRatio * 100, 2) : "—"}
+              />
+            </MetricGroup>
           </div>
         </Card>
       </section>
@@ -578,13 +631,26 @@ function Field({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Card className="p-3">
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-semibold">{value}</div>
-    </Card>
+    <div>
+      <div className="mb-2 text-sm font-semibold">{title}</div>
+      <div className="flex flex-col gap-1.5">{children}</div>
+    </div>
   );
+}
+
+function MetricRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 text-sm">
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
+}
+
+function fmtRatio(n: number | null): string {
+  return n != null ? `${n.toFixed(2)}` : "—";
 }
 
 function ChartCard({
