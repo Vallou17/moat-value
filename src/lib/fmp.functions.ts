@@ -327,18 +327,27 @@ const EDGAR_TTL_MS = 30 * 24 * 60 * 60_000; // 30 days — annual filings barely
 const EDGAR_HEADERS = { "User-Agent": "ValueScope contact@valuescope.app" };
 
 let tickerToCikCache: Record<string, string> | null = null;
+let tickerToCikPromise: Promise<Record<string, string>> | null = null;
 async function getCikForTicker(ticker: string): Promise<string | null> {
   if (!tickerToCikCache) {
-    const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
-      headers: EDGAR_HEADERS,
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const map: Record<string, string> = {};
-    for (const row of Object.values(json) as any[]) {
-      if (row?.ticker) map[String(row.ticker).toUpperCase()] = String(row.cik_str).padStart(10, "0");
+    // Share the in-flight request so concurrent callers (history + balance snapshot, which
+    // now run in parallel) don't each trigger their own fetch of this large file.
+    if (!tickerToCikPromise) {
+      tickerToCikPromise = (async () => {
+        const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
+          headers: EDGAR_HEADERS,
+        });
+        if (!res.ok) return {};
+        const json = await res.json();
+        const map: Record<string, string> = {};
+        for (const row of Object.values(json) as any[]) {
+          if (row?.ticker)
+            map[String(row.ticker).toUpperCase()] = String(row.cik_str).padStart(10, "0");
+        }
+        return map;
+      })();
     }
-    tickerToCikCache = map;
+    tickerToCikCache = await tickerToCikPromise;
   }
   return tickerToCikCache[ticker.toUpperCase()] ?? null;
 }
@@ -554,9 +563,11 @@ export const getStockData = createServerFn({ method: "GET" })
     const t = data.ticker.toUpperCase();
     const warnings: string[] = [];
 
-    const [quoteArr, fundamentals] = await Promise.all([
+    const [quoteArr, fundamentals, edgarBalance, edgarHistory] = await Promise.all([
       fmp<any[]>(`/quote?symbol=${t}`), // always fresh — price changes constantly
       getCachedFundamentals(t), // cached up to 7 days — income/cashflow/balance/profile/estimates
+      fetchEdgarBalanceSnapshot(t).catch(() => null), // free EDGAR debt/cash — runs in parallel
+      getCachedEdgarHistory(t).catch(() => null), // free EDGAR 10y revenue/FCF — runs in parallel
     ]);
     const { profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr } = fundamentals;
  
@@ -591,7 +602,6 @@ const rawTotalDebt = balance0.totalDebt;
     // Prefer SEC EDGAR for debt/cash when available — it's the free, official, primary source
     // and avoids relying on FMP's pre-aggregated totalDebt field (which we've seen be
     // inconsistent in the past). Falls back to FMP's figures for non-US filers or on failure.
-    const edgarBalance = await fetchEdgarBalanceSnapshot(t).catch(() => null);
     const totalDebt = edgarBalance?.totalDebt ?? fmpTotalDebt;
     const cashBs = edgarBalance?.cash ?? fmpCashBs;
 
@@ -677,9 +687,8 @@ const rawTotalDebt = balance0.totalDebt;
       })
       .filter((h) => h.year > 0);
 
-    // Try SEC EDGAR first for up to 10 years of free, official history (US filers only).
-    // Falls back to the ~5 years FMP's current plan provides for non-US tickers or if EDGAR fails.
-    const edgarHistory = await getCachedEdgarHistory(t).catch(() => null);
+    // Use SEC EDGAR if it has more years than FMP's plan provides (typically true for US
+    // filers); falls back to FMP's ~5 years for non-US tickers or if EDGAR fails.
     const history = edgarHistory && edgarHistory.length > fmpHistory.length ? edgarHistory : fmpHistory;
  
     const ratios0 = ratiosArr?.[0] ?? {};
