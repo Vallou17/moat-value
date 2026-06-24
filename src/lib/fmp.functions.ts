@@ -258,6 +258,66 @@ const parseRss = (xml: string): NewsItem[] => {
   },
 );
  
+// ---------- Stock fundamentals cache (7 days) ----------
+// Income statement, cash flow, balance sheet, key metrics, profile and analyst estimates
+// only change quarterly at most. Caching them for 7 days means cost scales with unique
+// tickers viewed per week, not with visitor count — the same Apple page can be viewed
+// 100,000 times in a week and only cost ~6 FMP calls total instead of 600,000.
+type RawFundamentals = {
+  quoteArr: any[];
+  profileArr: any[];
+  incomeArr: any[];
+  cashArr: any[];
+  balanceArr: any[];
+  keyMetricsArr: any[];
+  estimatesArr: any[];
+};
+
+const FUNDAMENTALS_TTL_MS = 7 * 24 * 60 * 60_000; // 7 days
+
+async function fetchFundamentalsFromFmp(ticker: string): Promise<RawFundamentals> {
+  const [profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
+    await Promise.all([
+      fmp<any[]>(`/profile?symbol=${ticker}`),
+      fmp<any[]>(`/income-statement?symbol=${ticker}&limit=5`),
+      fmp<any[]>(`/cash-flow-statement?symbol=${ticker}&limit=5`),
+      fmp<any[]>(`/balance-sheet-statement?symbol=${ticker}&limit=1`),
+      fmp<any[]>(`/key-metrics?symbol=${ticker}&limit=1`).catch(() => []),
+      fmp<any[]>(`/analyst-estimates?symbol=${ticker}&period=annual`).catch(() => []),
+    ]);
+  // quote is fetched separately (always fresh) — store an empty array here, caller fills it in.
+  return { quoteArr: [], profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr };
+}
+
+async function getCachedFundamentals(ticker: string): Promise<RawFundamentals> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row } = await supabaseAdmin
+    .from("stock_fundamentals_cache")
+    .select("payload, updated_at")
+    .eq("ticker", ticker)
+    .maybeSingle();
+
+  const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < FUNDAMENTALS_TTL_MS;
+  if (isFresh) return row.payload as RawFundamentals;
+
+  try {
+    const fresh = await fetchFundamentalsFromFmp(ticker);
+    await supabaseAdmin
+      .from("stock_fundamentals_cache")
+      .upsert(
+        { ticker, payload: fresh, updated_at: new Date().toISOString() },
+        { onConflict: "ticker" },
+      );
+    return fresh;
+  } catch (err) {
+    // FMP failed (rate-limited, network issue) — serve stale cache if we have any, since
+    // fundamentals barely change week to week and a stale view beats a broken page.
+    if (row) return row.payload as RawFundamentals;
+    throw err;
+  }
+}
+
+
 export type StockData = {
   ticker: string;
   companyName: string;
@@ -288,17 +348,12 @@ export const getStockData = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<StockData> => {
     const t = data.ticker.toUpperCase();
     const warnings: string[] = [];
- 
-    const [quoteArr, profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
-      await Promise.all([
-        fmp<any[]>(`/quote?symbol=${t}`),
-        fmp<any[]>(`/profile?symbol=${t}`),
-        fmp<any[]>(`/income-statement?symbol=${t}&limit=5`),
-        fmp<any[]>(`/cash-flow-statement?symbol=${t}&limit=5`),
-        fmp<any[]>(`/balance-sheet-statement?symbol=${t}&limit=1`),
-        fmp<any[]>(`/key-metrics?symbol=${t}&limit=1`).catch(() => []),
-        fmp<any[]>(`/analyst-estimates?symbol=${t}&period=annual`).catch(() => []),
-      ]);
+
+    const [quoteArr, fundamentals] = await Promise.all([
+      fmp<any[]>(`/quote?symbol=${t}`), // always fresh — price changes constantly
+      getCachedFundamentals(t), // cached up to 7 days — income/cashflow/balance/profile/estimates
+    ]);
+    const { profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr } = fundamentals;
  
     if (!quoteArr?.length) throw new Error("Ticker não encontrado");
     const quote = quoteArr[0];
@@ -324,12 +379,6 @@ const rawTotalDebt = balance0.totalDebt;
         : typeof rawTotalDebt === "string" && Number(rawTotalDebt) > 0
           ? Number(rawTotalDebt)
           : Number(balance0.shortTermDebt ?? 0) + Number(balance0.longTermDebt ?? 0);
-    console.log("[ValueScope DEBUG] totalDebt source:", {
-      rawTotalDebt,
-      shortTermDebt: balance0.shortTermDebt,
-      longTermDebt: balance0.longTermDebt,
-      finalTotalDebt: totalDebt,
-    });
     const cashBs = Number(
       balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
     );
