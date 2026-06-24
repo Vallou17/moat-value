@@ -279,8 +279,8 @@ async function fetchFundamentalsFromFmp(ticker: string): Promise<RawFundamentals
   const [profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
     await Promise.all([
       fmp<any[]>(`/profile?symbol=${ticker}`),
-      fmp<any[]>(`/income-statement?symbol=${ticker}&limit=5`),
-      fmp<any[]>(`/cash-flow-statement?symbol=${ticker}&limit=5`),
+      fmp<any[]>(`/income-statement?symbol=${ticker}&limit=10`),
+      fmp<any[]>(`/cash-flow-statement?symbol=${ticker}&limit=10`),
       fmp<any[]>(`/balance-sheet-statement?symbol=${ticker}&limit=1`),
       fmp<any[]>(`/key-metrics?symbol=${ticker}&limit=1`).catch(() => []),
       fmp<any[]>(`/analyst-estimates?symbol=${ticker}&period=annual`).catch(() => []),
