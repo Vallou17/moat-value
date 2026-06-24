@@ -8,6 +8,7 @@ import {
   RotateCcw,
   Sparkles,
   Calculator,
+  BarChart3,
   Star,
   AlertTriangle,
   ChevronDown,
@@ -257,13 +258,22 @@ const defaults = useMemo(
         </div>
       )}
 
-      {/* Intrinsic value */}
+      {/* Intrinsic value (includes collapsible assumptions panel) */}
       <div className="mt-6 grid gap-4 sm:grid-cols-1">
         <IvCard
           label="Valor Intrínseco"
           iv={ivAdjusted.intrinsicValuePerShare}
           price={data.price}
           currency={data.currency}
+          discountRate={discountRate}
+          g1={g1}
+          g2={g2}
+          g3={g3}
+          onDiscountRateChange={setDiscountRate}
+          onG1Change={setG1}
+          onG2Change={setG2}
+          onG3Change={setG3}
+          onReset={reset}
         />
       </div>
 
@@ -277,49 +287,26 @@ const defaults = useMemo(
         />
       </div>
 
-      {/* Assumptions */}
-      <Collapsible defaultOpen className="mt-6">
-        <Card className="p-0">
-          <CollapsibleTrigger className="flex w-full items-center justify-between p-5 text-left">
-            <div>
-              <h2 className="text-base font-semibold">Personalizar Pressupostos</h2>
-              <p className="text-xs text-muted-foreground">
-                Ajuste e veja o valor intrínseco recalculado em tempo real.
-              </p>
-            </div>
-            <ChevronDown className="h-4 w-4 transition-transform data-[state=open]:rotate-180" />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="border-t border-border/60 p-5">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Taxa de Desconto (%)" value={discountRate} step={0.1} onChange={setDiscountRate} />
-              <Field label="Crescimento FCF Anos 1–5 (%)" value={g1} step={0.1} onChange={setG1} />
-              <Field label="Crescimento FCF Anos 6–10 (%)" value={g2} step={0.1} onChange={setG2} />
-              <Field label="Crescimento FCF Anos 11–20 (%)" value={g3} step={0.1} onChange={setG3} />
-            </div>
-            <Button variant="ghost" size="sm" className="mt-4" onClick={reset}>
-              <RotateCcw className="mr-2 h-3.5 w-3.5" /> Repor valores originais
-            </Button>
-          </CollapsibleContent>
-        </Card>
-      </Collapsible>
-
       {/* Metrics */}
       <section className="mt-6">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Métricas Financeiras
-        </h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Metric label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
-          <Metric label="Operating Cash Flow" value={fmtCompact(data.operatingCashFlow, data.currency)} />
-          <Metric label="CAPEX (último ano)" value={fmtCompact(data.capex, data.currency)} />
-          <Metric label="CAPEX Médio 4A" value={fmtCompact(data.meanCapex4y, data.currency)} />
-          <Metric label="FCF Ajustado" value={fmtCompact(data.fcfAdjusted, data.currency)} />
-          <Metric label="Dívida Total" value={fmtCompact(data.totalDebt, data.currency)} />
-          <Metric label="Caixa & Equivalentes" value={fmtCompact(data.cash, data.currency)} />
-          <Metric label="Ações em Circulação" value={fmtCompact(data.sharesOutstanding, data.currency).replace(/[^\d.,KMBT]/g, "")} />
-          <Metric label="P/E" value={data.peRatio != null ? data.peRatio.toFixed(2) : "—"} />
-          <Metric label="ROIC" value={data.roic != null ? fmtPct(data.roic * 100, 1) : "—"} />
-        </div>
+        <Card className="p-4 sm:p-5">
+          <h2 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
+            <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Métricas
+            Financeiras
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <Metric label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
+            <Metric label="Operating Cash Flow" value={fmtCompact(data.operatingCashFlow, data.currency)} />
+            <Metric label="CAPEX (último ano)" value={fmtCompact(data.capex, data.currency)} />
+            <Metric label="CAPEX Médio 4A" value={fmtCompact(data.meanCapex4y, data.currency)} />
+            <Metric label="FCF Ajustado" value={fmtCompact(data.fcfAdjusted, data.currency)} />
+            <Metric label="Dívida Total" value={fmtCompact(data.totalDebt, data.currency)} />
+            <Metric label="Caixa & Equivalentes" value={fmtCompact(data.cash, data.currency)} />
+            <Metric label="Ações em Circulação" value={fmtCompact(data.sharesOutstanding, data.currency).replace(/[^\d.,KMBT]/g, "")} />
+            <Metric label="P/E" value={data.peRatio != null ? data.peRatio.toFixed(2) : "—"} />
+            <Metric label="ROIC" value={data.roic != null ? fmtPct(data.roic * 100, 1) : "—"} />
+          </div>
+        </Card>
       </section>
 
       {/* Charts */}
@@ -330,13 +317,14 @@ const defaults = useMemo(
 
       {/* Moat (placeholder) */}
       <section className="mt-6">
-        <Card className="p-5">
+        <Card className="p-4 sm:p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="flex items-center gap-2 text-base font-semibold">
-                <Sparkles className="h-4 w-4 text-primary" /> Análise de Moat (IA)
+              <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
+                <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Análise de
+                Moat (IA)
               </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-2 text-sm text-muted-foreground">
                 Análise de vantagens competitivas gerada por IA — disponível em breve.
               </p>
             </div>
@@ -355,11 +343,29 @@ function IvCard({
   iv,
   price,
   currency,
+  discountRate,
+  g1,
+  g2,
+  g3,
+  onDiscountRateChange,
+  onG1Change,
+  onG2Change,
+  onG3Change,
+  onReset,
 }: {
   label: string;
   iv: number;
   price: number;
   currency: string;
+  discountRate: number;
+  g1: number;
+  g2: number;
+  g3: number;
+  onDiscountRateChange: (n: number) => void;
+  onG1Change: (n: number) => void;
+  onG2Change: (n: number) => void;
+  onG3Change: (n: number) => void;
+  onReset: () => void;
 }) {
   const dp = discountPremiumPct(price, iv); // negative = undervalued, positive = overvalued
   const discount = dp < 0;
@@ -415,6 +421,29 @@ function IvCard({
             Valor intrínseco calculado através de algoritmo próprio derivado do método
             Discounted Cash Flow
           </div>
+
+          <Collapsible className="mt-4">
+            <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border/60 bg-card/40 px-4 py-3 text-left">
+              <div>
+                <div className="text-sm font-semibold">Personalizar Pressupostos</div>
+                <p className="text-xs text-muted-foreground">
+                  Ajuste e veja o valor intrínseco recalculado em tempo real.
+                </p>
+              </div>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="rounded-b-lg border border-t-0 border-border/60 bg-card/40 p-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Field label="Taxa de Desconto (%)" value={discountRate} step={0.1} onChange={onDiscountRateChange} />
+                <Field label="Crescimento FCF Anos 1–5 (%)" value={g1} step={0.1} onChange={onG1Change} />
+                <Field label="Crescimento FCF Anos 6–10 (%)" value={g2} step={0.1} onChange={onG2Change} />
+                <Field label="Crescimento FCF Anos 11–20 (%)" value={g3} step={0.1} onChange={onG3Change} />
+              </div>
+              <Button variant="ghost" size="sm" className="mt-4" onClick={onReset}>
+                <RotateCcw className="mr-2 h-3.5 w-3.5" /> Repor valores originais
+              </Button>
+            </CollapsibleContent>
+          </Collapsible>
         </>
       ) : (
         <div className="mt-2 text-3xl font-bold">—</div>
@@ -566,8 +595,10 @@ function ChartCard({
   currency: string;
 }) {
   return (
-    <Card className="p-4">
-      <div className="mb-2 text-sm font-semibold">{title}</div>
+    <Card className="p-4 sm:p-5">
+      <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
+        <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> {title}
+      </h2>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
