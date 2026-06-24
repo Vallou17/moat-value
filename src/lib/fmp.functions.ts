@@ -505,6 +505,7 @@ export type StockData = {
   cash: number;
   sharesOutstanding: number;
   peRatio: number | null;
+  peNtm: number | null;
   roic: number | null;
   baseGrowthRate: number;
   history: { year: number; revenue: number; fcf: number }[];
@@ -623,7 +624,24 @@ const rawTotalDebt = balance0.totalDebt;
         }
       }
     }
- 
+
+    // PE NTM (next twelve months) — current price divided by the next fiscal year's
+    // estimated EPS, using the same analyst estimates already fetched for the growth rate.
+    let peNtm: number | null = null;
+    if (Array.isArray(estimatesArr) && estimatesArr.length) {
+      const currentYear = new Date().getFullYear();
+      const nextYearEstimates = estimatesArr
+        .filter((e: any) => {
+          const y = Number(String(e.date ?? "").slice(0, 4));
+          return y >= currentYear && epsEst(e) > 0;
+        })
+        .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)));
+      const nextEps = nextYearEstimates[0] ? epsEst(nextYearEstimates[0]) : 0;
+      if (nextEps > 0 && quote.price) {
+        peNtm = Number(quote.price) / nextEps;
+      }
+    }
+
     if (freeCashFlow < 0)
       warnings.push("FCF negativo — o cálculo pode não ser fiável.");
  
@@ -677,6 +695,7 @@ const rawTotalDebt = balance0.totalDebt;
       cash: cashBs,
       sharesOutstanding,
       peRatio: quote.pe != null ? Number(quote.pe) : null,
+      peNtm,
       roic: km0.roic != null ? Number(km0.roic) : null,
       baseGrowthRate,
       history,
