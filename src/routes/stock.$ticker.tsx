@@ -9,6 +9,7 @@ import {
   Sparkles,
   Calculator,
   BarChart3,
+  Info,
   Star,
   AlertTriangle,
   ChevronDown,
@@ -389,9 +390,9 @@ function IvCard({
           : undefined
       }
     >
-      <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        <Calculator className="h-3.5 w-3.5 text-primary" /> {label}
-      </div>
+      <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
+        <Calculator className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> {label}
+      </h2>
 
       {valid ? (
         <>
@@ -417,9 +418,12 @@ function IvCard({
             </div>
           </div>
 
-          <div className="mt-4 max-w-md rounded-xl border border-border bg-card/60 px-3 py-1.5 text-left text-[9px] leading-snug text-muted-foreground sm:mx-auto sm:max-w-full sm:rounded-full sm:px-4 sm:py-1.5 sm:text-center sm:text-xs sm:leading-normal sm:whitespace-nowrap">
-            Valor intrínseco calculado através de algoritmo próprio derivado do método
-            Discounted Cash Flow
+          <div className="mt-4 flex items-start gap-2 text-left text-[11px] leading-snug text-muted-foreground sm:text-xs">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span>
+              Valor intrínseco calculado através de algoritmo próprio derivado do método
+              Discounted Cash Flow
+            </span>
           </div>
 
           <Collapsible className="mt-4">
@@ -427,17 +431,17 @@ function IvCard({
               <div>
                 <div className="text-sm font-semibold">Personalizar Pressupostos</div>
                 <p className="text-xs text-muted-foreground">
-                  Ajuste e veja o valor intrínseco recalculado em tempo real.
+                  Ajusta os pressupostos e recalcula o valor intrínseco.
                 </p>
               </div>
               <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
             </CollapsibleTrigger>
             <CollapsibleContent className="rounded-b-lg border border-t-0 border-border/60 bg-card/40 p-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Field label="Taxa de Desconto (%)" value={discountRate} step={0.1} onChange={onDiscountRateChange} />
-                <Field label="Crescimento FCF Anos 1–5 (%)" value={g1} step={0.1} onChange={onG1Change} />
-                <Field label="Crescimento FCF Anos 6–10 (%)" value={g2} step={0.1} onChange={onG2Change} />
-                <Field label="Crescimento FCF Anos 11–20 (%)" value={g3} step={0.1} onChange={onG3Change} />
+                <Field label="Crescimento Free Cash Flow Anos 1–5 (%)" value={g1} step={0.1} onChange={onG1Change} />
+                <Field label="Crescimento Free Cash Flow Anos 6–10 (%)" value={g2} step={0.1} onChange={onG2Change} />
+                <Field label="Crescimento Free Cash Flow Anos 11–20 (%)" value={g3} step={0.1} onChange={onG3Change} />
               </div>
               <Button variant="ghost" size="sm" className="mt-4" onClick={onReset}>
                 <RotateCcw className="mr-2 h-3.5 w-3.5" /> Repor valores originais
