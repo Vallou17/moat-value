@@ -271,12 +271,13 @@ type RawFundamentals = {
   balanceArr: any[];
   keyMetricsArr: any[];
   estimatesArr: any[];
+  ratiosArr: any[];
 };
 
 const FUNDAMENTALS_TTL_MS = 7 * 24 * 60 * 60_000; // 7 days
 
 async function fetchFundamentalsFromFmp(ticker: string): Promise<RawFundamentals> {
-  const [profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr] =
+  const [profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr] =
     await Promise.all([
       fmp<any[]>(`/profile?symbol=${ticker}`),
       fmp<any[]>(`/income-statement?symbol=${ticker}&limit=5`),
@@ -284,9 +285,10 @@ async function fetchFundamentalsFromFmp(ticker: string): Promise<RawFundamentals
       fmp<any[]>(`/balance-sheet-statement?symbol=${ticker}&limit=1`),
       fmp<any[]>(`/key-metrics?symbol=${ticker}&limit=1`).catch(() => []),
       fmp<any[]>(`/analyst-estimates?symbol=${ticker}&period=annual`).catch(() => []),
+      fmp<any[]>(`/ratios?symbol=${ticker}&limit=1`).catch(() => []),
     ]);
   // quote is fetched separately (always fresh) — store an empty array here, caller fills it in.
-  return { quoteArr: [], profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr };
+  return { quoteArr: [], profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr };
 }
 
 async function getCachedFundamentals(ticker: string): Promise<RawFundamentals> {
@@ -507,6 +509,22 @@ export type StockData = {
   baseGrowthRate: number;
   history: { year: number; revenue: number; fcf: number }[];
   warnings: string[];
+  // Valuation
+  marketCap: number | null;
+  priceToSales: number | null;
+  evToEBITDA: number | null;
+  priceToBook: number | null;
+  // Cash Flow
+  freeCashFlowYield: number | null;
+  freeCashFlowPerShare: number | null;
+  // Margins & Growth
+  netProfitMargin: number | null;
+  operatingProfitMargin: number | null;
+  revenueGrowthYoY: number | null;
+  netIncomeGrowthYoY: number | null;
+  // Dividend
+  dividendYield: number | null;
+  dividendPayoutRatio: number | null;
 };
  
 export const getStockData = createServerFn({ method: "GET" })
@@ -521,7 +539,7 @@ export const getStockData = createServerFn({ method: "GET" })
       fmp<any[]>(`/quote?symbol=${t}`), // always fresh — price changes constantly
       getCachedFundamentals(t), // cached up to 7 days — income/cashflow/balance/profile/estimates
     ]);
-    const { profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr } = fundamentals;
+    const { profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr } = fundamentals;
  
     if (!quoteArr?.length) throw new Error("Ticker não encontrado");
     const quote = quoteArr[0];
@@ -628,6 +646,20 @@ const rawTotalDebt = balance0.totalDebt;
     const edgarHistory = await getCachedEdgarHistory(t).catch(() => null);
     const history = edgarHistory && edgarHistory.length > fmpHistory.length ? edgarHistory : fmpHistory;
  
+    const ratios0 = ratiosArr?.[0] ?? {};
+    const km0 = keyMetricsArr?.[0] ?? {};
+
+    // YoY growth from the two most recent annual income statements (incomeArr is newest-first).
+    const revenueGrowthYoY =
+      incomeArr.length >= 2 && Number(incomeArr[1].revenue) > 0
+        ? (Number(incomeArr[0].revenue) - Number(incomeArr[1].revenue)) / Number(incomeArr[1].revenue)
+        : null;
+    const netIncomeGrowthYoY =
+      incomeArr.length >= 2 && Number(incomeArr[1].netIncome) !== 0
+        ? (Number(incomeArr[0].netIncome) - Number(incomeArr[1].netIncome)) /
+          Math.abs(Number(incomeArr[1].netIncome))
+        : null;
+
     return {
       ticker: t,
       companyName: profile.companyName ?? quote.name ?? t,
@@ -645,9 +677,24 @@ const rawTotalDebt = balance0.totalDebt;
       cash: cashBs,
       sharesOutstanding,
       peRatio: quote.pe != null ? Number(quote.pe) : null,
-      roic: keyMetricsArr?.[0]?.roic != null ? Number(keyMetricsArr[0].roic) : null,
+      roic: km0.roic != null ? Number(km0.roic) : null,
       baseGrowthRate,
       history,
       warnings,
+      marketCap: km0.marketCap != null ? Number(km0.marketCap) : (quote.marketCap ?? null),
+      priceToSales: ratios0.priceToSalesRatio != null ? Number(ratios0.priceToSalesRatio) : null,
+      evToEBITDA: km0.evToEBITDA != null ? Number(km0.evToEBITDA) : null,
+      priceToBook: ratios0.priceToBookRatio != null ? Number(ratios0.priceToBookRatio) : null,
+      freeCashFlowYield: km0.freeCashFlowYield != null ? Number(km0.freeCashFlowYield) : null,
+      freeCashFlowPerShare:
+        ratios0.freeCashFlowPerShare != null ? Number(ratios0.freeCashFlowPerShare) : null,
+      netProfitMargin: ratios0.netProfitMargin != null ? Number(ratios0.netProfitMargin) : null,
+      operatingProfitMargin:
+        ratios0.operatingProfitMargin != null ? Number(ratios0.operatingProfitMargin) : null,
+      revenueGrowthYoY,
+      netIncomeGrowthYoY,
+      dividendYield: ratios0.dividendYield != null ? Number(ratios0.dividendYield) : null,
+      dividendPayoutRatio:
+        ratios0.dividendPayoutRatio != null ? Number(ratios0.dividendPayoutRatio) : null,
     };
   });
