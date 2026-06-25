@@ -563,11 +563,12 @@ export const getStockData = createServerFn({ method: "GET" })
     const t = data.ticker.toUpperCase();
     const warnings: string[] = [];
 
-    const [quoteArr, fundamentals, edgarBalance, edgarHistory] = await Promise.all([
+    const [quoteArr, fundamentals, edgarBalance] = await Promise.all([
       fmp<any[]>(`/quote?symbol=${t}`), // always fresh — price changes constantly
       getCachedFundamentals(t), // cached up to 7 days — income/cashflow/balance/profile/estimates
-      fetchEdgarBalanceSnapshot(t).catch(() => null), // free EDGAR debt/cash — runs in parallel
-      getCachedEdgarHistory(t).catch(() => null), // free EDGAR 10y revenue/FCF — runs in parallel
+      fetchEdgarBalanceSnapshot(t).catch(() => null), // free EDGAR debt/cash — affects the DCF, needed now
+      // Note: the 10-year revenue/FCF history chart is fetched separately via getStockHistory()
+      // so the slower SEC EDGAR roundtrip never blocks the main page (price, DCF, metrics).
     ]);
     const { profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr } = fundamentals;
  
@@ -689,7 +690,7 @@ const rawTotalDebt = balance0.totalDebt;
 
     // Use SEC EDGAR if it has more years than FMP's plan provides (typically true for US
     // filers); falls back to FMP's ~5 years for non-US tickers or if EDGAR fails.
-    const history = edgarHistory && edgarHistory.length > fmpHistory.length ? edgarHistory : fmpHistory;
+    const history = fmpHistory;
  
     const ratios0 = ratiosArr?.[0] ?? {};
     const km0 = keyMetricsArr?.[0] ?? {};
@@ -743,4 +744,38 @@ const rawTotalDebt = balance0.totalDebt;
       dividendPayoutRatio:
         ratios0.dividendPayoutRatio != null ? Number(ratios0.dividendPayoutRatio) : null,
     };
+  });
+
+// ---------- Stock history (lazy-loaded, separate from getStockData) ----------
+// Fetched on-demand by the chart component after the main page has already rendered,
+// so the slower SEC EDGAR roundtrip never delays price/DCF/metrics from showing up.
+export const getStockHistory = createServerFn({ method: "GET" })
+  .inputValidator((d: { ticker: string }) =>
+    z.object({ ticker: z.string().min(1).max(15) }).parse(d),
+  )
+  .handler(async ({ data }): Promise<{ year: number; revenue: number; fcf: number }[]> => {
+    const t = data.ticker.toUpperCase();
+
+    const [fundamentals, edgarHistory] = await Promise.all([
+      getCachedFundamentals(t), // same 7-day cache getStockData uses — no extra FMP cost
+      getCachedEdgarHistory(t).catch(() => null),
+    ]);
+    const { incomeArr, cashArr } = fundamentals;
+
+    const fmpHistory = incomeArr
+      .slice()
+      .reverse()
+      .map((inc: any) => {
+        const year = Number(String(inc.date ?? "").slice(0, 4)) || 0;
+        const matchingCash = cashArr.find((c: any) => String(c.date).slice(0, 4) === String(year));
+        return {
+          year,
+          revenue: Number(inc.revenue ?? 0),
+          fcf: Number(matchingCash?.freeCashFlow ?? 0),
+        };
+      })
+      .filter((h) => h.year > 0);
+
+    // Prefer SEC EDGAR when it covers more years than FMP's plan allows.
+    return edgarHistory && edgarHistory.length > fmpHistory.length ? edgarHistory : fmpHistory;
   });
