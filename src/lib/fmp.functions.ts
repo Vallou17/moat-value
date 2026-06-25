@@ -722,7 +722,7 @@ const rawTotalDebt = balance0.totalDebt;
       totalDebt,
       cash: cashBs,
       sharesOutstanding,
-      peRatio: quote.pe != null ? Number(quote.pe) : null,
+      peRatio: ratios0.priceToEarningsRatio != null ? Number(ratios0.priceToEarningsRatio) : null,
       peNtm,
       roic: km0.roic != null ? Number(km0.roic) : null,
       baseGrowthRate,
