@@ -305,7 +305,7 @@ const defaults = useMemo(
             Indicadores
           </h2>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
-            <MetricGroup title="Valuation">
+            <MetricGroup title="Avaliação">
               <MetricRow label="Market Cap" value={data.marketCap != null ? fmtCompact(data.marketCap, data.currency) : "—"} />
               <MetricRow
                 label="P/E (TTM | NTM)"
@@ -318,7 +318,7 @@ const defaults = useMemo(
               <MetricRow label="Price to Book" value={fmtRatio(data.priceToBook)} />
             </MetricGroup>
 
-            <MetricGroup title="Cash Flow">
+            <MetricGroup title="Fluxo de Caixa">
               <MetricRow label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
               <MetricRow
                 label="FCF Yield"
@@ -333,7 +333,7 @@ const defaults = useMemo(
               <MetricRow label="FCF Ajustado" value={fmtCompact(data.fcfAdjusted, data.currency)} />
             </MetricGroup>
 
-            <MetricGroup title="Margins & Growth">
+            <MetricGroup title="Margens e Crescimento">
               <MetricRow
                 label="Profit Margin"
                 value={data.netProfitMargin != null ? fmtPct(data.netProfitMargin * 100, 2) : "—"}
@@ -353,7 +353,7 @@ const defaults = useMemo(
               <MetricRow label="ROIC" value={data.roic != null ? fmtPct(data.roic * 100, 1) : "—"} />
             </MetricGroup>
 
-            <MetricGroup title="Balance">
+            <MetricGroup title="Balanço">
               <MetricRow label="Caixa & Equivalentes" value={fmtCompact(data.cash, data.currency)} />
               <MetricRow label="Dívida Total" value={fmtCompact(data.totalDebt, data.currency)} />
               <MetricRow label="Dívida Líquida" value={fmtCompact(data.totalDebt - data.cash, data.currency)} />
@@ -363,7 +363,7 @@ const defaults = useMemo(
               />
             </MetricGroup>
 
-            <MetricGroup title="Dividend">
+            <MetricGroup title="Dividendos">
               <MetricRow
                 label="Dividend Yield"
                 value={data.dividendYield != null ? fmtPct(data.dividendYield * 100, 2) : "—"}
