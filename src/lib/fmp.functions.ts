@@ -712,7 +712,7 @@ const rawTotalDebt = balance0.totalDebt;
       exchange: profile.exchangeShortName ?? quote.exchange ?? "",
       currency: profile.currency ?? "USD",
       price: Number(quote.price ?? 0),
-      changePercent: Number(quote.changesPercentage ?? 0),
+      changePercent: Number(quote.changePercentage ?? quote.changesPercentage ?? 0),
       logoUrl: profile.image || null,
       freeCashFlow,
       operatingCashFlow,
