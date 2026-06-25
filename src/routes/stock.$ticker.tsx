@@ -381,14 +381,14 @@ const defaults = useMemo(
 
           <div className="mt-6 grid gap-4 border-t border-border/60 pt-6 lg:grid-cols-2">
             <ChartCard
-              title="Receita (últimos anos)"
+              title="Receita"
               data={historyQuery.data}
               isLoading={historyQuery.isLoading}
               dataKey="revenue"
               currency={data.currency}
             />
             <ChartCard
-              title="Free Cash Flow (últimos anos)"
+              title="Free Cash Flow"
               data={historyQuery.data}
               isLoading={historyQuery.isLoading}
               dataKey="fcf"
@@ -682,6 +682,30 @@ function fmtRatio(n: number | null): string {
   return n != null ? `${n.toFixed(1)}` : "—";
 }
 
+// Custom bar shape: the bar under the cursor gets brightened instead of the default
+// Recharts grey "cursor" rectangle behind the whole category. Mirrors the hover treatment
+// used on the intrinsic-value Gauge, where the highlight lives on the shape itself.
+function makeHighlightBar(activeIndex: number | null) {
+  return function HighlightBar(props: any) {
+    const { x, y, width, height, index } = props;
+    if (height <= 0) return null;
+    const isActive = index === activeIndex;
+    return (
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={6}
+        ry={6}
+        fill="var(--primary)"
+        opacity={isActive ? 1 : 0.75}
+        style={{ transition: "opacity 120ms ease" }}
+      />
+    );
+  };
+}
+
 function ChartCard({
   title,
   data,
@@ -695,6 +719,9 @@ function ChartCard({
   dataKey: "revenue" | "fcf";
   currency: string;
 }) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const seriesName = dataKey === "revenue" ? "Receita" : "FCF";
+
   return (
     <div>
       <div className="mb-3 text-sm font-semibold">{title}</div>
@@ -703,7 +730,18 @@ function ChartCard({
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
         ) : (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <BarChart
+            data={data}
+            margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+            onMouseMove={(state: any) => {
+              if (state?.isTooltipActive && typeof state.activeTooltipIndex === "number") {
+                setActiveIndex(state.activeTooltipIndex);
+              } else {
+                setActiveIndex(null);
+              }
+            }}
+            onMouseLeave={() => setActiveIndex(null)}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis dataKey="year" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
             <YAxis
@@ -712,15 +750,21 @@ function ChartCard({
               width={48}
             />
             <Tooltip
+              cursor={false}
               contentStyle={{
                 background: "var(--popover)",
                 border: "1px solid var(--border)",
                 borderRadius: 8,
                 fontSize: 12,
               }}
-              formatter={(v: number) => fmtCompact(v, currency)}
+              formatter={(v: number) => [fmtCompact(v, currency), seriesName]}
             />
-            <Bar dataKey={dataKey} fill="var(--primary)" radius={[6, 6, 0, 0]} />
+            <Bar
+              dataKey={dataKey}
+              name={seriesName}
+              isAnimationActive={false}
+              shape={makeHighlightBar(activeIndex) as any}
+            />
           </BarChart>
         </ResponsiveContainer>
         )}
