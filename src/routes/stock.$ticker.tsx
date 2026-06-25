@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
@@ -87,10 +87,16 @@ function StockPage() {
     );
   }
 
-  return <StockView data={data} />;
+  return <StockView data={data} historyQuery={historyQuery} />;
 }
 
-function StockView({ data }: { data: StockData }) {
+function StockView({
+  data,
+  historyQuery,
+}: {
+  data: StockData;
+  historyQuery: UseQueryResult<{ year: number; revenue: number; fcf: number }[]>;
+}) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [inWatch, setInWatch] = useState(false);
