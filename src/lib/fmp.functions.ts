@@ -406,6 +406,161 @@ async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<numbe
   return simple;
 }
 
+// ---------- Quarterly EDGAR parsing ----------
+// 10-Q "duration" facts (Revenue, Operating Cash Flow, CAPEX) are commonly reported
+// year-to-date rather than as an isolated quarter — e.g. a company's Q3 10-Q often
+// discloses revenue for the trailing 9 months, not just the 3 months of Q3. The `fp`
+// field ("Q1"/"Q2"/"Q3"/"FY") is filer-supplied and not a reliable signal of which shape
+// a given fact has, and is sometimes missing on older filings. The robust signal is the
+// fact's own reported duration: end-date minus start-date.
+const DAY_MS = 86_400_000;
+function durationDays(start: string, end: string): number {
+  const s = new Date(start).getTime();
+  const e = new Date(end).getTime();
+  if (!isFinite(s) || !isFinite(e)) return NaN;
+  return Math.round((e - s) / DAY_MS);
+}
+
+type AccumPeriod = "Q" | "H1" | "9M" | "FY";
+
+// One fiscal year's worth of duration buckets, keyed by what the fact actually covers.
+// "Q" entries are keyed further by which quarter (1-4) once we know start month.
+type YearBuckets = {
+  q?: Map<number, { val: number; filed: string }>; // isolated quarter -> quarter number
+  h1?: { val: number; filed: string };
+  ninemonths?: { val: number; filed: string };
+  fy?: { val: number; filed: string };
+};
+
+// Classify a single fact by its real duration and file it under the fiscal year its
+// `end` date falls in. Quarter number is inferred from how many quarters separate
+// `start` from the most recent fiscal-year start we've seen for this concept — but since
+// we don't always know the fiscal year boundary up front, we instead key isolated quarters
+// by their `end` month distance from `start`, then sort/assign Q1..Q4 per year afterward
+// based on chronological order within that year.
+function classifyFact(entry: any): { year: number; kind: AccumPeriod; val: number; filed: string; end: string; start: string } | null {
+  const start = String(entry.start ?? "");
+  const end = String(entry.end ?? "");
+  if (!start || !end) return null; // instant facts or malformed — skip
+  const days = durationDays(start, end);
+  if (!isFinite(days)) return null;
+  const year = Number(end.slice(0, 4));
+  if (!year) return null;
+  const filed = String(entry.filed ?? "");
+  const val = Number(entry.val);
+  if (!isFinite(val)) return null;
+
+  // Only accept facts from 10-Q or 10-K — skip 8-Ks, S-1s, amendments' duplicate contexts, etc.
+  if (entry.form !== "10-Q" && entry.form !== "10-K") return null;
+
+  if (days >= 60 && days <= 120) return { year, kind: "Q", val, filed, end, start };
+  if (days >= 150 && days <= 210) return { year, kind: "H1", val, filed, end, start };
+  if (days >= 240 && days <= 300) return { year, kind: "9M", val, filed, end, start };
+  if (days >= 340 && days <= 390 && entry.form === "10-K") return { year, kind: "FY", val, filed, end, start };
+  return null; // unrecognized duration (stub period, odd fiscal change) — skip rather than guess
+}
+
+export type QuarterPoint = { year: number; quarter: 1 | 2 | 3 | 4; revenue: number; fcf: number };
+
+// Builds per-quarter Revenue/OperatingCF/CAPEX maps for one XBRL concept across all its tags,
+// keeping the most-recently-filed value whenever a period is reported more than once
+// (restatements), exactly like the annual fetchEdgarConcept does.
+async function fetchEdgarConceptByPeriod(cik: string, tags: string[]) {
+  // year -> bucket of accumulated/isolated facts
+  const years = new Map<number, YearBuckets>();
+  // Track isolated quarters separately with their start date so we can later sort them
+  // chronologically within a fiscal year (quarter 1..4) without relying on `fp`.
+  const isolatedByYear = new Map<number, { start: string; end: string; val: number; filed: string }[]>();
+
+  for (const tag of tags) {
+    try {
+      const res = await fetch(
+        `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
+        { headers: EDGAR_HEADERS },
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const usd = json?.units?.USD;
+      if (!Array.isArray(usd)) continue;
+
+      for (const entry of usd) {
+        const c = classifyFact(entry);
+        if (!c) continue;
+        if (c.kind === "Q") {
+          const list = isolatedByYear.get(c.year) ?? [];
+          list.push({ start: c.start, end: c.end, val: c.val, filed: c.filed });
+          isolatedByYear.set(c.year, list);
+          continue;
+        }
+        const bucket = years.get(c.year) ?? {};
+        const key = c.kind === "H1" ? "h1" : c.kind === "9M" ? "ninemonths" : "fy";
+        const existing = bucket[key];
+        if (!existing || c.filed > existing.filed) {
+          bucket[key] = { val: c.val, filed: c.filed };
+        }
+        years.set(c.year, bucket);
+      }
+    } catch {
+      // try next tag
+    }
+  }
+
+  // De-duplicate isolated quarters (restatements) by (start,end) window, keep latest filed.
+  const dedupedIsolated = new Map<number, Map<string, { start: string; end: string; val: number; filed: string }>>();
+  for (const [year, list] of isolatedByYear) {
+    const byWindow = new Map<string, { start: string; end: string; val: number; filed: string }>();
+    for (const item of list) {
+      const k = `${item.start}|${item.end}`;
+      const existing = byWindow.get(k);
+      if (!existing || item.filed > existing.filed) byWindow.set(k, item);
+    }
+    dedupedIsolated.set(year, byWindow);
+    years.set(year, years.get(year) ?? {});
+  }
+
+  return { years, dedupedIsolated };
+}
+
+// Reconstructs Q1..Q4 isolated values for one fiscal year from whatever combination of
+// isolated-quarter and accumulated (H1/9M/FY) facts is available. Returns null for any
+// quarter we can't derive — callers should treat null as "no data" rather than guess.
+function reconstructQuarters(
+  year: number,
+  bucket: YearBuckets,
+  isolated: Map<string, { start: string; end: string; val: number; filed: string }> | undefined,
+): (number | null)[] {
+  // Sort isolated quarters chronologically by start date — this is how we assign them to
+  // Q1..Q4 without depending on the filer-supplied `fp` label.
+  const sortedIsolated = Array.from(isolated?.values() ?? []).sort((a, b) =>
+    a.start.localeCompare(b.start),
+  );
+  const q: (number | null)[] = [null, null, null, null];
+  sortedIsolated.slice(0, 4).forEach((item, i) => {
+    q[i] = item.val;
+  });
+
+  const h1 = bucket.h1?.val ?? null;
+  const ninemonths = bucket.ninemonths?.val ?? null;
+  const fy = bucket.fy?.val ?? null;
+
+  // Q1: prefer isolated; otherwise unknown (H1/9M alone can't isolate Q1).
+  // Q2 = H1 - Q1, when both are known.
+  if (q[1] == null && h1 != null && q[0] != null) q[1] = h1 - q[0];
+  // Q3 = 9M - H1 (best), else 9M - Q1 - Q2 if H1 itself wasn't reported separately.
+  if (q[2] == null && ninemonths != null) {
+    if (h1 != null) q[2] = ninemonths - h1;
+    else if (q[0] != null && q[1] != null) q[2] = ninemonths - q[0] - q[1];
+  }
+  // Q4 = FY - 9M (best), else FY - H1 - Q3, else FY - Q1 - Q2 - Q3.
+  if (q[3] == null && fy != null) {
+    if (ninemonths != null) q[3] = fy - ninemonths;
+    else if (h1 != null && q[2] != null) q[3] = fy - h1 - q[2];
+    else if (q[0] != null && q[1] != null && q[2] != null) q[3] = fy - q[0] - q[1] - q[2];
+  }
+
+  return q;
+}
+
 // Balance sheet items (debt, cash) are point-in-time "instant" facts, not period totals.
 // We want the single most recent reported value, from any filing (10-K or 10-Q).
 async function fetchEdgarLatestInstant(cik: string, tags: string[]): Promise<number | null> {
@@ -486,7 +641,65 @@ async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | nu
   });
 }
 
-async function getCachedEdgarHistory(ticker: string): Promise<EdgarHistory | null> {
+// Quarterly counterpart of fetchEdgarHistoryFresh. EDGAR's 10-Q coverage is shallower than
+// 10-K coverage (companies only have to keep quarterly XBRL for as long as the SEC's
+// retention/their own filing history goes back, typically a handful of years vs 10-K's
+// decade+), so this naturally returns fewer periods than the annual series — that's expected,
+// not a bug, and the caller/UI should treat "less history available" as the normal case here.
+async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterPoint[] | null> {
+  const cik = await getCikForTicker(ticker);
+  if (!cik) return null;
+
+  const [revenueParts, opCfParts, capexParts] = await Promise.all([
+    fetchEdgarConceptByPeriod(cik, REVENUE_TAGS),
+    fetchEdgarConceptByPeriod(cik, OPERATING_CF_TAGS),
+    fetchEdgarConceptByPeriod(cik, CAPEX_TAGS),
+  ]);
+
+  const allYears = new Set<number>([
+    ...revenueParts.years.keys(),
+    ...revenueParts.dedupedIsolated.keys(),
+  ]);
+  if (allYears.size === 0) return null;
+
+  const out: QuarterPoint[] = [];
+  for (const year of Array.from(allYears).sort((a, b) => a - b)) {
+    const revQ = reconstructQuarters(
+      year,
+      revenueParts.years.get(year) ?? {},
+      revenueParts.dedupedIsolated.get(year),
+    );
+    const opQ = reconstructQuarters(
+      year,
+      opCfParts.years.get(year) ?? {},
+      opCfParts.dedupedIsolated.get(year),
+    );
+    const capQ = reconstructQuarters(
+      year,
+      capexParts.years.get(year) ?? {},
+      capexParts.dedupedIsolated.get(year),
+    );
+
+    for (let i = 0; i < 4; i++) {
+      const rev = revQ[i];
+      const op = opQ[i];
+      const cap = capQ[i];
+      // Skip a quarter entirely if we couldn't derive revenue — a chart point with no
+      // revenue isn't useful even if FCF happened to be derivable.
+      if (rev == null) continue;
+      const fcf = op != null ? op - Math.abs(cap ?? 0) : 0;
+      out.push({ year, quarter: (i + 1) as 1 | 2 | 3 | 4, revenue: rev, fcf });
+    }
+  }
+
+  // Keep only the most recent ~40 quarters (10 years) to match the annual series' window
+  // and avoid handing the client an unbounded list for long-listed companies.
+  return out.slice(-40);
+}
+
+type CachedEdgarHistory = { annual: EdgarHistory; quarterly: QuarterPoint[] };
+
+async function getCachedEdgarHistory(ticker: string): Promise<CachedEdgarHistory | null> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data: row } = await supabaseAdmin
     .from("edgar_history_cache")
@@ -494,12 +707,23 @@ async function getCachedEdgarHistory(ticker: string): Promise<EdgarHistory | nul
     .eq("ticker", ticker)
     .maybeSingle();
 
+  // Older cache rows predate the {annual, quarterly} shape (they stored a bare array).
+  // Treat those as a miss so they get recomputed once into the new shape — cheap since
+  // EDGAR is free, and this only happens once per ticker after the rollout.
+  const cached = row?.history as CachedEdgarHistory | EdgarHistory | undefined;
+  const isNewShape =
+    cached && typeof cached === "object" && !Array.isArray(cached) && "annual" in cached;
+
   const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < EDGAR_TTL_MS;
-  if (isFresh) return row.history as EdgarHistory;
+  if (isFresh && isNewShape) return cached as CachedEdgarHistory;
 
   try {
-    const fresh = await fetchEdgarHistoryFresh(ticker);
-    if (fresh && fresh.length > 0) {
+    const [annual, quarterly] = await Promise.all([
+      fetchEdgarHistoryFresh(ticker),
+      fetchEdgarHistoryQuarterlyFresh(ticker).catch(() => null),
+    ]);
+    if (annual && annual.length > 0) {
+      const fresh: CachedEdgarHistory = { annual, quarterly: quarterly ?? [] };
       await supabaseAdmin
         .from("edgar_history_cache")
         .upsert(
@@ -508,9 +732,14 @@ async function getCachedEdgarHistory(ticker: string): Promise<EdgarHistory | nul
         );
       return fresh;
     }
-    return row ? (row.history as EdgarHistory) : null;
+    // Fresh fetch failed but we have an old-shape or stale row — salvage what we can.
+    if (isNewShape) return cached as CachedEdgarHistory;
+    if (cached && Array.isArray(cached)) return { annual: cached, quarterly: [] };
+    return null;
   } catch {
-    return row ? (row.history as EdgarHistory) : null;
+    if (isNewShape) return cached as CachedEdgarHistory;
+    if (cached && Array.isArray(cached)) return { annual: cached, quarterly: [] };
+    return null;
   }
 }
 
@@ -749,11 +978,23 @@ const rawTotalDebt = balance0.totalDebt;
 // ---------- Stock history (lazy-loaded, separate from getStockData) ----------
 // Fetched on-demand by the chart component after the main page has already rendered,
 // so the slower SEC EDGAR roundtrip never delays price/DCF/metrics from showing up.
+//
+// `quarterly` comes exclusively from SEC EDGAR. FMP's quarterly income-statement/cash-flow
+// endpoints exist but are capped by the same `limit=5` plan restriction that affects the
+// annual endpoints — at most ~1 year of quarters, not enough for a useful chart — so there's
+// no FMP fallback for the quarterly series the way there is for annual. Companies that don't
+// file 10-Qs with the SEC (non-US filers) will simply get an empty `quarterly` array; the UI
+// should treat that as "quarterly view unavailable for this ticker", not as an error.
+export type StockHistoryResponse = {
+  annual: { year: number; revenue: number; fcf: number }[];
+  quarterly: QuarterPoint[];
+};
+
 export const getStockHistory = createServerFn({ method: "GET" })
   .inputValidator((d: { ticker: string }) =>
     z.object({ ticker: z.string().min(1).max(15) }).parse(d),
   )
-  .handler(async ({ data }): Promise<{ year: number; revenue: number; fcf: number }[]> => {
+  .handler(async ({ data }): Promise<StockHistoryResponse> => {
     const t = data.ticker.toUpperCase();
 
     const [fundamentals, edgarHistory] = await Promise.all([
@@ -762,7 +1003,7 @@ export const getStockHistory = createServerFn({ method: "GET" })
     ]);
     const { incomeArr, cashArr } = fundamentals;
 
-    const fmpHistory = incomeArr
+    const fmpAnnual = incomeArr
       .slice()
       .reverse()
       .map((inc: any) => {
@@ -776,6 +1017,9 @@ export const getStockHistory = createServerFn({ method: "GET" })
       })
       .filter((h) => h.year > 0);
 
-    // Prefer SEC EDGAR when it covers more years than FMP's plan allows.
-    return edgarHistory && edgarHistory.length > fmpHistory.length ? edgarHistory : fmpHistory;
+    // Prefer SEC EDGAR's annual series when it covers more years than FMP's plan allows.
+    const edgarAnnual = edgarHistory?.annual ?? null;
+    const annual = edgarAnnual && edgarAnnual.length > fmpAnnual.length ? edgarAnnual : fmpAnnual;
+
+    return { annual, quarterly: edgarHistory?.quarterly ?? [] };
   });
