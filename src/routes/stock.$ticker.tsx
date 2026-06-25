@@ -312,7 +312,7 @@ const defaults = useMemo(
           </h2>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
             <MetricGroup title="Avaliação">
-              <MetricRow label="Market Cap" value={data.marketCap != null ? fmtCompact(data.marketCap, data.currency) : "—"} />
+              <MetricRow label="Capitalização Bolsista" value={data.marketCap != null ? fmtCompact(data.marketCap, data.currency) : "—"} />
               <MetricRow
                 label="P/E (TTM | NTM)"
                 value={`${data.peRatio != null ? data.peRatio.toFixed(2) : "—"} | ${
@@ -324,7 +324,7 @@ const defaults = useMemo(
               <MetricRow label="Price to Book" value={fmtRatio(data.priceToBook)} />
             </MetricGroup>
 
-            <MetricGroup title="Fluxo de Caixa">
+            <MetricGroup title="Free Cash Flow">
               <MetricRow label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
               <MetricRow
                 label="FCF Yield"
@@ -336,16 +336,15 @@ const defaults = useMemo(
               />
               <MetricRow label="CAPEX (último ano)" value={fmtCompact(data.capex, data.currency)} />
               <MetricRow label="CAPEX Médio 4A" value={fmtCompact(data.meanCapex4y, data.currency)} />
-              <MetricRow label="FCF Ajustado" value={fmtCompact(data.fcfAdjusted, data.currency)} />
             </MetricGroup>
 
             <MetricGroup title="Margens e Crescimento">
               <MetricRow
-                label="Profit Margin"
+                label="Margem de Lucro"
                 value={data.netProfitMargin != null ? fmtPct(data.netProfitMargin * 100, 2) : "—"}
               />
               <MetricRow
-                label="Operating Margin"
+                label="Margem Operacional"
                 value={data.operatingProfitMargin != null ? fmtPct(data.operatingProfitMargin * 100, 2) : "—"}
               />
               <MetricRow
@@ -356,7 +355,6 @@ const defaults = useMemo(
                 label="Lucro Líquido (YoY)"
                 value={data.netIncomeGrowthYoY != null ? fmtPct(data.netIncomeGrowthYoY * 100, 2) : "—"}
               />
-              <MetricRow label="ROIC" value={data.roic != null ? fmtPct(data.roic * 100, 1) : "—"} />
             </MetricGroup>
 
             <MetricGroup title="Balanço">
@@ -674,7 +672,7 @@ function MetricGroup({ title, children }: { title: string; children: ReactNode }
 
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 text-sm">
+    <div className="flex items-baseline justify-between gap-3 text-xs">
       <span className="text-muted-foreground">{label}:</span>
       <span className="font-medium">{value}</span>
     </div>
