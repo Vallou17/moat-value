@@ -688,14 +688,21 @@ function fmtRatio(n: number | null): string {
 function makeHighlightBar(activeIndex: number | null) {
   return function HighlightBar(props: any) {
     const { x, y, width, height, index } = props;
-    if (height <= 0) return null;
+    if (!Number.isFinite(height) || !Number.isFinite(y)) return null;
+
+    // Recharts can hand us a negative `height` for bars below the zero baseline
+    // (negative FCF years) — drawing a <rect> with a negative height renders nothing,
+    // so normalize to a positive size and keep y pinned to the bar's actual top edge.
+    const absHeight = Math.abs(height);
+    const top = height < 0 ? y + height : y;
     const isActive = index === activeIndex;
+
     return (
       <rect
         x={x}
-        y={y}
+        y={top}
         width={width}
-        height={height}
+        height={Math.max(absHeight, 1)}
         rx={6}
         ry={6}
         fill="var(--primary)"
@@ -756,7 +763,10 @@ function ChartCard({
                 border: "1px solid var(--border)",
                 borderRadius: 8,
                 fontSize: 12,
+                color: "var(--popover-foreground)",
               }}
+              labelStyle={{ color: "var(--popover-foreground)" }}
+              itemStyle={{ color: "var(--popover-foreground)" }}
               formatter={(v: number) => [fmtCompact(v, currency), seriesName]}
             />
             <Bar
