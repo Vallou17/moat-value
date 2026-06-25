@@ -23,7 +23,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { getStockData, type StockData } from "@/lib/fmp.functions";
+import { getStockData, getStockHistory, type StockData } from "@/lib/fmp.functions";
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { computeDcf, discountPremiumPct } from "@/lib/dcf";
 import { fmtMoney, fmtPct, fmtCompact, pushRecent } from "@/lib/format";
@@ -48,6 +48,15 @@ function StockPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["stock", ticker.toUpperCase()],
     queryFn: () => getStockData({ data: { ticker } }),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  // Fetched separately so the slower SEC EDGAR roundtrip for 10y history never delays
+  // the price/DCF/metrics above from rendering — charts just show a loading state briefly.
+  const historyQuery = useQuery({
+    queryKey: ["stock-history", ticker.toUpperCase()],
+    queryFn: () => getStockHistory({ data: { ticker } }),
     staleTime: 5 * 60_000,
     retry: 1,
   });
@@ -370,8 +379,20 @@ const defaults = useMemo(
 
       {/* Charts */}
       <section className="mt-6 grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Receita (últimos anos)" data={data.history} dataKey="revenue" currency={data.currency} />
-        <ChartCard title="Free Cash Flow (últimos anos)" data={data.history} dataKey="fcf" currency={data.currency} />
+        <ChartCard
+          title="Receita (últimos anos)"
+          data={historyQuery.data}
+          isLoading={historyQuery.isLoading}
+          dataKey="revenue"
+          currency={data.currency}
+        />
+        <ChartCard
+          title="Free Cash Flow (últimos anos)"
+          data={historyQuery.data}
+          isLoading={historyQuery.isLoading}
+          dataKey="fcf"
+          currency={data.currency}
+        />
       </section>
 
       {/* Moat (placeholder) */}
@@ -661,11 +682,13 @@ function fmtRatio(n: number | null): string {
 function ChartCard({
   title,
   data,
+  isLoading,
   dataKey,
   currency,
 }: {
   title: string;
-  data: { year: number; revenue: number; fcf: number }[];
+  data: { year: number; revenue: number; fcf: number }[] | undefined;
+  isLoading?: boolean;
   dataKey: "revenue" | "fcf";
   currency: string;
 }) {
@@ -675,6 +698,9 @@ function ChartCard({
         <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> {title}
       </h2>
       <div className="h-56">
+        {isLoading || !data ? (
+          <div className="h-full w-full animate-pulse rounded bg-muted/40" />
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -696,6 +722,7 @@ function ChartCard({
             <Bar dataKey={dataKey} fill="var(--primary)" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
+        )}
       </div>
     </Card>
   );
