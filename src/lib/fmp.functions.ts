@@ -1,746 +1,781 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  ArrowLeft,
-  ArrowDownRight,
-  ArrowUpRight,
-  RotateCcw,
-  Sparkles,
-  Calculator,
-  BarChart3,
-  Info,
-  Star,
-  AlertTriangle,
-  ChevronDown,
-} from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { getStockData, getStockHistory, type StockData } from "@/lib/fmp.functions";
-import { PriceHistoryChart } from "@/components/PriceHistoryChart";
-import { computeDcf, discountPremiumPct } from "@/lib/dcf";
-import { fmtMoney, fmtPct, fmtCompact, pushRecent } from "@/lib/format";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
-
-export const Route = createFileRoute("/stock/$ticker")({
-  component: StockPage,
-});
-
-function StockPage() {
-  const { ticker } = Route.useParams();
-  const navigate = useNavigate();
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["stock", ticker.toUpperCase()],
-    queryFn: () => getStockData({ data: { ticker } }),
-    staleTime: 5 * 60_000,
-    retry: 1,
-  });
-
-  // Fetched separately so the slower SEC EDGAR roundtrip for 10y history never delays
-  // the price/DCF/metrics above from rendering — charts just show a loading state briefly.
-  const historyQuery = useQuery({
-    queryKey: ["stock-history", ticker.toUpperCase()],
-    queryFn: () => getStockHistory({ data: { ticker } }),
-    staleTime: 5 * 60_000,
-    retry: 1,
-  });
-
-  useEffect(() => {
-    if (data) pushRecent({ ticker: data.ticker, name: data.companyName });
-  }, [data]);
-
-  if (isLoading) return <StockSkeleton />;
-
-  if (error || !data) {
-    const errMessage = (error as Error | undefined)?.message ?? "";
-    const isApiKeyMissing = errMessage.toLowerCase().includes("não configurada") || errMessage.toLowerCase().includes("fmp_api_key");
-    return (
-      <div className="mx-auto max-w-xl px-4 py-16 text-center">
-        <h1 className="text-xl font-semibold">
-          {isApiKeyMissing ? "Erro de configuração" : `Não foi possível carregar ${ticker}`}
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {isApiKeyMissing
-            ? "Chave da API FMP não configurada — adicione FMP_API_KEY nas definições do projeto."
-            : errMessage || "Ticker não encontrado ou API indisponível."}
-        </p>
-        <Button className="mt-6" variant="secondary" onClick={() => navigate({ to: "/" })}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
-        </Button>
-      </div>
-    );
-  }
-
-  return <StockView data={data} historyQuery={historyQuery} />;
+// build-version: 2026-06-18-v2
+// FMP API proxy — keeps the API key server-side.
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+ 
+const BASE = "https://financialmodelingprep.com/stable";
+ 
+function key() {
+  const k = process.env.FMP_API_KEY ?? process.env.VITE_FMP_API_KEY;
+  if (!k) throw new Error("Chave FMP_API_KEY não configurada no servidor.");
+  return k;
 }
-
-function StockView({
-  data,
-  historyQuery,
-}: {
-  data: StockData;
-  historyQuery: UseQueryResult<{ year: number; revenue: number; fcf: number }[]>;
-}) {
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const [inWatch, setInWatch] = useState(false);
-  const [savingWatch, setSavingWatch] = useState(false);
-
-  // Defaults
-const defaults = useMemo(
-    () => ({
-      discountRate: 5,
-      g1to5: Math.round(data.baseGrowthRate * 100),
-      g6to10: Math.round((data.baseGrowthRate * 100) / 2),
-      g11to20: Math.round((data.baseGrowthRate * 100) / 4),
-    }),
-    [data.baseGrowthRate],
-  );
-
-  const [discountRate, setDiscountRate] = useState(defaults.discountRate);
-  const [g1, setG1] = useState(defaults.g1to5);
-  const [g2, setG2] = useState(defaults.g6to10);
-  const [g3, setG3] = useState(defaults.g11to20);
-
-  // reset when ticker (data) changes
-  useEffect(() => {
-    setDiscountRate(defaults.discountRate);
-    setG1(defaults.g1to5);
-    setG2(defaults.g6to10);
-    setG3(defaults.g11to20);
-  }, [defaults]);
-
-  const ivStandard = useMemo(
-    () =>
-      computeDcf({
-        startingFcf: data.freeCashFlow,
-        growthRate1to5: g1 / 100,
-        growthRate6to10: g2 / 100,
-        growthRate11to20: g3 / 100,
-        discountRate: discountRate / 100,
-        sharesOutstanding: data.sharesOutstanding,
-        totalDebt: data.totalDebt,
-        cash: data.cash,
-      }),
-    [data, g1, g2, g3, discountRate],
-  );
-
-  const ivAdjusted = useMemo(
-    () =>
-      computeDcf({
-        startingFcf: data.fcfAdjusted,
-        growthRate1to5: g1 / 100,
-        growthRate6to10: g2 / 100,
-        growthRate11to20: g3 / 100,
-        discountRate: discountRate / 100,
-        sharesOutstanding: data.sharesOutstanding,
-        totalDebt: data.totalDebt,
-        cash: data.cash,
-      }),
-    [data, g1, g2, g3, discountRate],
-  );
-
-  // watchlist check
-  useEffect(() => {
-    if (!user) return;
-    supabase
-      .from("watchlist")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("ticker", data.ticker)
-      .maybeSingle()
-      .then(({ data: row }) => setInWatch(!!row));
-  }, [user, data.ticker]);
-
-  async function toggleWatch() {
-    if (!user) {
-      toast.info("Faça login para guardar ações.");
-      navigate({ to: "/auth" });
-      return;
-    }
-    setSavingWatch(true);
-    if (inWatch) {
-      await supabase
-        .from("watchlist")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("ticker", data.ticker);
-      setInWatch(false);
-      toast.success("Removido da watchlist");
-    } else {
-      const { error } = await supabase.from("watchlist").insert({
-        user_id: user.id,
-        ticker: data.ticker,
-        company_name: data.companyName,
-      });
-      if (error) toast.error(error.message);
-      else {
-        setInWatch(true);
-        toast.success("Adicionado à watchlist");
-      }
-    }
-    setSavingWatch(false);
+ 
+async function fmp<T = unknown>(path: string): Promise<T> {
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${BASE}${path}${sep}apikey=${key()}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`FMP ${res.status} em ${path.split("?")[0]}${body ? `: ${body.slice(0, 120)}` : ""}`);
   }
-
-  function reset() {
-    setDiscountRate(defaults.discountRate);
-    setG1(defaults.g1to5);
-    setG2(defaults.g6to10);
-    setG3(defaults.g11to20);
+  const json = await res.json();
+  if (json && typeof json === "object" && !Array.isArray(json) && "Error Message" in json) {
+    throw new Error(`FMP: ${(json as any)["Error Message"]}`);
   }
-
-  return (
-    <div className="mx-auto max-w-[1400px] px-4 pb-20 pt-4 sm:px-6 sm:pt-6 lg:px-10">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mb-1 -ml-2"
-        onClick={() => navigate({ to: "/" })}
-      >
-        <ArrowLeft className="mr-1 h-4 w-4" /> Voltar
-      </Button>
-
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex w-full items-start justify-between gap-3 sm:w-auto sm:items-center sm:justify-start sm:gap-4">
-          <div className="order-1">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="rounded bg-secondary px-2 py-0.5 font-medium">{data.ticker}</span>
-              {data.exchange && <span>{data.exchange}</span>}
-            </div>
-            <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-3xl">
-              {data.companyName}
-            </h1>
-            <div className="mt-2 flex items-baseline gap-3">
-              <span className="text-2xl font-semibold sm:text-3xl">
-                {fmtMoney(data.price, data.currency)}
-              </span>
-              <span
-                className={
-                  "flex items-center text-sm font-medium " +
-                  (data.changePercent >= 0 ? "text-success" : "text-destructive")
-                }
-              >
-                {data.changePercent >= 0 ? (
-                  <ArrowUpRight className="h-4 w-4" />
-                ) : (
-                  <ArrowDownRight className="h-4 w-4" />
-                )}
-                {fmtPct(data.changePercent, 1)}
-              </span>
-            </div>
-          </div>
-          {data.logoUrl && (
-            <img
-              src={data.logoUrl}
-              alt={data.companyName}
-              className="order-2 mt-5 h-16 w-16 shrink-0 rounded-xl border border-border/60 bg-white object-contain p-1.5 sm:order-0 sm:mt-0 sm:h-24 sm:w-24 sm:rounded-2xl sm:p-2 lg:h-28 lg:w-28"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
-            />
-          )}
-        </div>
-        <Button variant={inWatch ? "secondary" : "outline"} onClick={toggleWatch} disabled={savingWatch}>
-          <Star className={"mr-2 h-4 w-4 " + (inWatch ? "fill-primary text-primary" : "")} />
-          {inWatch ? "Na watchlist" : "Adicionar à watchlist"}
-        </Button>
-      </div>
-
-      {data.warnings.length > 0 && (
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
-          <AlertTriangle className="mt-0.5 h-4 w-4 text-warning" />
-          <div>
-            {data.warnings.map((w) => (
-              <div key={w}>{w}</div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Intrinsic value (includes collapsible assumptions panel) */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-1">
-        <IvCard
-          label="Valor Intrínseco"
-          iv={ivAdjusted.intrinsicValuePerShare}
-          price={data.price}
-          currency={data.currency}
-          discountRate={discountRate}
-          g1={g1}
-          g2={g2}
-          g3={g3}
-          onDiscountRateChange={setDiscountRate}
-          onG1Change={setG1}
-          onG2Change={setG2}
-          onG3Change={setG3}
-          onReset={reset}
-        />
-      </div>
-
-      {/* Price history chart */}
-      <div className="mt-6">
-        <PriceHistoryChart
-          symbol={data.ticker}
-          currentPrice={data.price}
-          currentChangePercent={data.changePercent}
-          currency={data.currency}
-        />
-      </div>
-
-      {/* Metrics */}
-      <section className="mt-6">
-        <Card className="p-4 sm:p-5">
-          <h2 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
-            <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Métricas e
-            Indicadores
-          </h2>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
-            <MetricGroup title="Avaliação">
-              <MetricRow label="Capitalização Bolsista" value={data.marketCap != null ? fmtCompact(data.marketCap, data.currency) : "—"} />
-              <MetricRow
-                label="P/E (TTM | NTM)"
-                value={`${data.peRatio != null ? data.peRatio.toFixed(1) : "—"} | ${
-                  data.peNtm != null ? data.peNtm.toFixed(1) : "—"
-                }`}
-              />
-              <MetricRow label="Price to Sales" value={fmtRatio(data.priceToSales)} />
-              <MetricRow label="EV to EBITDA" value={fmtRatio(data.evToEBITDA)} />
-              <MetricRow label="Price to Book" value={fmtRatio(data.priceToBook)} />
-            </MetricGroup>
-
-            <MetricGroup title="Free Cash Flow">
-              <MetricRow label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
-              <MetricRow
-                label="FCF Yield"
-                value={data.freeCashFlowYield != null ? fmtPct(data.freeCashFlowYield * 100, 1) : "—"}
-              />
-              <MetricRow
-                label="FCF por Ação"
-                value={data.freeCashFlowPerShare != null ? fmtMoney(data.freeCashFlowPerShare, data.currency) : "—"}
-              />
-              <MetricRow label="CAPEX (último ano)" value={fmtCompact(data.capex, data.currency)} />
-              <MetricRow label="CAPEX Médio (últimos 4 anos)" value={fmtCompact(data.meanCapex4y, data.currency)} />
-            </MetricGroup>
-
-            <MetricGroup title="Margens e Crescimento">
-              <MetricRow
-                label="Margem de Lucro"
-                value={data.netProfitMargin != null ? fmtPct(data.netProfitMargin * 100, 1) : "—"}
-              />
-              <MetricRow
-                label="Margem Operacional"
-                value={data.operatingProfitMargin != null ? fmtPct(data.operatingProfitMargin * 100, 1) : "—"}
-              />
-              <MetricRow
-                label="Receita (YoY)"
-                value={data.revenueGrowthYoY != null ? fmtPct(data.revenueGrowthYoY * 100, 1) : "—"}
-              />
-              <MetricRow
-                label="Lucro Líquido (YoY)"
-                value={data.netIncomeGrowthYoY != null ? fmtPct(data.netIncomeGrowthYoY * 100, 1) : "—"}
-              />
-            </MetricGroup>
-
-            <MetricGroup title="Balanço">
-              <MetricRow label="Caixa & Equivalentes" value={fmtCompact(data.cash, data.currency)} />
-              <MetricRow label="Dívida Total" value={fmtCompact(data.totalDebt, data.currency)} />
-              <MetricRow label="Dívida Líquida" value={fmtCompact(data.totalDebt - data.cash, data.currency)} />
-              <MetricRow
-                label="Ações em Circulação"
-                value={fmtCompact(data.sharesOutstanding, data.currency).replace(/[^\d.,KMBT]/g, "")}
-              />
-            </MetricGroup>
-
-            <MetricGroup title="Dividendos">
-              <MetricRow
-                label="Dividend Yield"
-                value={data.dividendYield != null ? fmtPct(data.dividendYield * 100, 1) : "—"}
-              />
-              <MetricRow
-                label="Payout Ratio"
-                value={data.dividendPayoutRatio != null ? fmtPct(data.dividendPayoutRatio * 100, 1) : "—"}
-              />
-            </MetricGroup>
-          </div>
-
-          <div className="mt-6 grid gap-4 border-t border-border/60 pt-6 lg:grid-cols-2">
-            <ChartCard
-              title="Receita (últimos anos)"
-              data={historyQuery.data}
-              isLoading={historyQuery.isLoading}
-              dataKey="revenue"
-              currency={data.currency}
-            />
-            <ChartCard
-              title="Free Cash Flow (últimos anos)"
-              data={historyQuery.data}
-              isLoading={historyQuery.isLoading}
-              dataKey="fcf"
-              currency={data.currency}
-            />
-          </div>
-        </Card>
-      </section>
-
-      {/* Moat (placeholder) */}
-      <section className="mt-6">
-        <Card className="p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
-                <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Análise de
-                Moat (IA)
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Análise de vantagens competitivas gerada por IA — disponível em breve.
-              </p>
-            </div>
-            <Button disabled variant="secondary">Em breve</Button>
-          </div>
-        </Card>
-      </section>
-    </div>
-  );
+  return json as T;
 }
-
-const ZONE_LABELS = ["Muito subavaliada", "Subavaliada", "Justo valor", "Sobreavaliada", "Muito sobreavaliada"];
-
-function IvCard({
-  label,
-  iv,
-  price,
-  currency,
-  discountRate,
-  g1,
-  g2,
-  g3,
-  onDiscountRateChange,
-  onG1Change,
-  onG2Change,
-  onG3Change,
-  onReset,
-}: {
-  label: string;
-  iv: number;
+ 
+export const searchStocks = createServerFn({ method: "GET" })
+  .inputValidator((d: { query: string }) => z.object({ query: z.string().min(1) }).parse(d))
+  .handler(async ({ data }) => {
+    type R = { symbol: string; name: string; exchangeShortName?: string; exchange?: string; currency?: string }[];
+    const q = data.query.trim();
+    const qU = q.toUpperCase();
+    const [bySymbol, byName] = await Promise.all([
+      fmp<R>(`/search-symbol?query=${encodeURIComponent(q)}&limit=10`).catch(() => [] as R),
+      fmp<R>(`/search-name?query=${encodeURIComponent(q)}&limit=10`).catch(() => [] as R),
+    ]);
+    const seen = new Set<string>();
+    const merged = [...bySymbol, ...byName]
+      .filter((r) => {
+        if (!r?.symbol) return false;
+        if (seen.has(r.symbol)) return false;
+        seen.add(r.symbol);
+        return true;
+      })
+      .map((r) => ({
+        ticker: r.symbol,
+        name: r.name,
+        exchange: r.exchangeShortName ?? r.exchange ?? "",
+        currency: r.currency ?? "USD",
+      }));
+    merged.sort((a, b) => {
+      const ax = a.ticker.toUpperCase() === qU ? 0 : 1;
+      const bx = b.ticker.toUpperCase() === qU ? 0 : 1;
+      return ax - bx;
+    });
+    return merged.slice(0, 10);
+  });
+ 
+// ---------- Market snapshot (ticker strip) ----------
+export type MarketQuote = {
+  symbol: string;
+  name: string;
   price: number;
-  currency: string;
-  discountRate: number;
-  g1: number;
-  g2: number;
-  g3: number;
-  onDiscountRateChange: (n: number) => void;
-  onG1Change: (n: number) => void;
-  onG2Change: (n: number) => void;
-  onG3Change: (n: number) => void;
-  onReset: () => void;
-}) {
-  const dp = discountPremiumPct(price, iv); // negative = undervalued, positive = overvalued
-  const discount = dp < 0;
-  const valid = isFinite(iv) && iv > 0;
+  changePercent: number;
+};
+ 
+const SNAPSHOT_SYMBOLS: { symbol: string; name: string }[] = [
+  { symbol: "^GSPC", name: "S&P 500" },
+  { symbol: "^IXIC", name: "NASDAQ" },
+  { symbol: "^DJI", name: "Dow Jones" },
+  { symbol: "^RUT", name: "Russell 2000" },
+  { symbol: "EURUSD", name: "EUR/USD" },
+];
+ 
+export const getMarketSnapshot = createServerFn({ method: "GET" }).handler(
+  async (): Promise<MarketQuote[]> => {
+    const results = await Promise.all(
+      SNAPSHOT_SYMBOLS.map(async ({ symbol, name }) => {
+        try {
+          const arr = await fmp<any[]>(`/quote?symbol=${encodeURIComponent(symbol)}`);
+          const q = arr?.[0];
+          if (!q) return null;
+          return {
+            symbol,
+            name,
+            price: Number(q.price ?? 0),
+            changePercent: Number(q.changePercentage ?? q.changesPercentage ?? 0),
+          };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return results.filter((r): r is MarketQuote => r !== null);
+  },
+);
+ 
+// ---------- Index history (candlestick) ----------
+export type Candle = { date: string; open: number; high: number; low: number; close: number };
 
-  // Map dp (%) to a 0..1 gauge position. Clamp at +/-60% so extreme cases don't break the needle.
-  const clamped = Math.max(-60, Math.min(60, dp));
-  const gaugeT = (clamped + 60) / 120; // 0 = far undervalued (left), 1 = far overvalued (right)
-
-  const zoneColors = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
-  const zoneIndex = Math.min(4, Math.floor(gaugeT * 5));
-  const zoneColor = zoneColors[zoneIndex];
-  const zoneLabel = ZONE_LABELS[zoneIndex];
-
-  return (
-    <Card
-      className="overflow-hidden px-5 pb-5 pt-3 sm:pt-5"
-      style={
-        valid
-          ? { background: `linear-gradient(135deg, ${zoneColor}14, transparent 65%)` }
-          : undefined
-      }
-    >
-      <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
-        <Calculator className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> {label}
-      </h2>
-
-      {valid ? (
-        <>
-          <div className="mt-5 flex flex-col items-center gap-4 sm:mt-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-center sm:text-left">
-              <div className="text-2xl font-bold sm:text-5xl">{fmtMoney(iv, currency)}</div>
-              <div
-                className="mt-2 whitespace-nowrap text-xs font-semibold sm:text-base"
-                style={{ color: zoneColor }}
-              >
-                Cotação atual {Math.abs(dp).toFixed(1)}% {discount ? "abaixo" : "acima"} do valor
-                intrínseco
-              </div>
-              <div className="mt-2 flex items-start gap-1.5 text-left text-[11px] leading-snug text-muted-foreground sm:text-xs">
-                <Info className="mt-[1px] h-3 w-3 shrink-0" />
-                <span>
-                  Valor intrínseco calculado através de algoritmo próprio derivado do método
-                  Discounted Cash Flow
-                </span>
-              </div>
-            </div>
-            <div className="flex flex-col items-center">
-              <Gauge t={gaugeT} color={zoneColor} />
-              <div
-                className="mt-2 rounded-full px-3 py-1 text-sm font-bold"
-                style={{ color: zoneColor, backgroundColor: `${zoneColor}22` }}
-              >
-                {zoneLabel}
-              </div>
-            </div>
-          </div>
-
-
-          <Collapsible className="mt-4">
-            <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border/60 bg-card/40 px-4 py-3 text-left">
-              <div>
-                <div className="text-sm font-semibold">Personalizar Pressupostos</div>
-                <p className="text-xs text-muted-foreground">
-                  Ajusta os pressupostos e recalcula o valor intrínseco.
-                </p>
-              </div>
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform data-[state=open]:rotate-180" />
-            </CollapsibleTrigger>
-            <CollapsibleContent className="rounded-b-lg border border-t-0 border-border/60 bg-card/40 p-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Taxa de Desconto (%)" value={discountRate} step={0.1} onChange={onDiscountRateChange} />
-                <Field label="Crescimento do Free Cash Flow nos anos 1–5 (%)" value={g1} step={0.1} onChange={onG1Change} />
-                <Field label="Crescimento do Free Cash Flow nos anos 6–10 (%)" value={g2} step={0.1} onChange={onG2Change} />
-                <Field label="Crescimento do Free Cash Flow nos anos 11–20 (%)" value={g3} step={0.1} onChange={onG3Change} />
-              </div>
-              <Button variant="ghost" size="sm" className="mt-4" onClick={onReset}>
-                <RotateCcw className="mr-2 h-3.5 w-3.5" /> Repor valores originais
-              </Button>
-            </CollapsibleContent>
-          </Collapsible>
-        </>
-      ) : (
-        <div className="mt-2 text-3xl font-bold">—</div>
-      )}
-    </Card>
-  );
+function tdKey() {
+  const k = process.env.TWELVE_DATA_API_KEY;
+  if (!k) return null;
+  return k;
 }
 
-// Interactive horizontal-style semicircular gauge with 5 colored zones (undervalued -> overvalued)
-// and a needle pointing at position t (0 = far left/undervalued, 1 = far right/overvalued).
-// Hovering a zone brightens it and shows a floating tooltip with that zone's category name.
-function Gauge({ t, color }: { t: number; color: string }) {
-  const W = 220;
-  const H = 120;
-  const cx = W / 2;
-  const cy = 105;
-  const r = 84;
-  const strokeW = 18;
-  const zones = ["#2E8B3D", "#8FC76B", "#F2C744", "#EF9F3C", "#D9483D"];
-  const zoneSpan = 180 / zones.length;
-  const [hovered, setHovered] = useState<number | null>(null);
+// Twelve Data symbol mapping — our FMP-style "^" index symbols don't exist on Twelve Data.
+const TD_SYMBOL_MAP: Record<string, string> = {
+  "^GSPC": "SPX",
+  "^IXIC": "IXIC",
+  "^DJI": "DJI",
+  "^RUT": "RUT",
+};
 
-  // angle 180 = left, angle 0 = right, sweeping over the top
-  const toXY = (angleDeg: number, radius: number) => {
-    const rad = (angleDeg * Math.PI) / 180;
-    return { x: cx + radius * Math.cos(rad), y: cy - radius * Math.sin(rad) };
-  };
+// Twelve Data's free (Basic) plan returns full daily history since listing for equities/indices
+// (no artificial "5 years" cap like FMP Starter, no "compact=100 points" cap like Alpha Vantage
+// free tier). Limit is 800 requests/day, so we still cache in Supabase for 24h.
+async function fetchFromTwelveData(symbol: string): Promise<Candle[] | null> {
+  const key = tdKey();
+  if (!key) return null;
+  const tdSymbol = TD_SYMBOL_MAP[symbol] ?? symbol.replace(/^\^/, "");
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(
+    tdSymbol,
+  )}&interval=1day&outputsize=5000&apikey=${key}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const json = await res.json();
+  if (json.status === "error" || !Array.isArray(json.values)) return null;
+  return json.values
+    .map((v: any) => ({
+      date: String(v.datetime),
+      open: Number(v.open),
+      high: Number(v.high),
+      low: Number(v.low),
+      close: Number(v.close),
+    }))
+    .sort((a: Candle, b: Candle) => a.date.localeCompare(b.date));
+}
 
-  const arcPath = (startDeg: number, endDeg: number, radius: number) => {
-    const p1 = toXY(startDeg, radius);
-    const p2 = toXY(endDeg, radius);
-    return `M ${p1.x} ${p1.y} A ${radius} ${radius} 0 0 1 ${p2.x} ${p2.y}`;
-  };
+async function getCachedLongHistory(symbol: string): Promise<Candle[] | null> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row } = await supabaseAdmin
+    .from("price_history_cache")
+    .select("candles, updated_at")
+    .eq("symbol", symbol)
+    .maybeSingle();
 
-  const needleAngle = 180 - t * 180; // t=0 -> 180 (left), t=1 -> 0 (right)
-  const tip = toXY(needleAngle, r - 16);
-  const base1 = toXY(needleAngle + 90, 5);
-  const base2 = toXY(needleAngle - 90, 5);
+  const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < 24 * 60 * 60_000;
+  if (isFresh) return row.candles as Candle[];
 
-  // Lighten a hex color for the hover highlight effect.
-  function lighten(hex: string, amount: number) {
-    const n = parseInt(hex.slice(1), 16);
-    const r0 = (n >> 16) & 255;
-    const g0 = (n >> 8) & 255;
-    const b0 = n & 255;
-    const mix = (c: number) => Math.round(c + (255 - c) * amount);
-    return `rgb(${mix(r0)}, ${mix(g0)}, ${mix(b0)})`;
+  const fresh = await fetchFromTwelveData(symbol);
+  if (!fresh || fresh.length === 0) {
+    // Twelve Data failed (rate-limited or symbol unsupported) — serve stale cache if we have any.
+    return row ? (row.candles as Candle[]) : null;
   }
 
-  // Tooltip anchor point along the arc (percentage-based x, so we can clamp it within the card).
-  const tooltipAnchor =
-    hovered !== null ? toXY(180 - (hovered + 0.5) * zoneSpan, r + 26) : null;
-  // Convert SVG x (0..W) to a 0..100% position, then clamp so the tooltip box (≈110px wide)
-  // never spills past the gauge's own bounding box.
-  const tooltipPctRaw = tooltipAnchor ? (tooltipAnchor.x / W) * 100 : 50;
-  const tooltipPct = Math.max(18, Math.min(82, tooltipPctRaw));
+  await supabaseAdmin
+    .from("price_history_cache")
+    .upsert({ symbol, candles: fresh, updated_at: new Date().toISOString() }, { onConflict: "symbol" });
 
-  return (
-    <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-[220px] overflow-visible">
-        {zones.map((c, i) => {
-          const start = 180 - i * zoneSpan;
-          const end = 180 - (i + 1) * zoneSpan;
-          const isHovered = hovered === i;
-          return (
-            <path
-              key={i}
-              d={arcPath(start, end, r)}
-              stroke={isHovered ? lighten(c, 0.35) : c}
-              strokeWidth={isHovered ? strokeW + 4 : strokeW}
-              fill="none"
-              className="cursor-pointer transition-all duration-150"
-              onMouseEnter={() => setHovered(i)}
-              onMouseLeave={() => setHovered(null)}
-            />
-          );
-        })}
-        <polygon
-          points={`${tip.x},${tip.y} ${base1.x},${base1.y} ${base2.x},${base2.y}`}
-          fill={color}
-        />
-        <circle cx={cx} cy={cy} r={6} fill={color} />
-      </svg>
-      {hovered !== null && tooltipAnchor && (
-        <div
-          className="pointer-events-none absolute z-10 flex -translate-x-1/2 items-center gap-1.5 whitespace-nowrap rounded-md bg-popover px-2.5 py-1.5 text-xs font-semibold text-popover-foreground shadow-lg ring-1 ring-border"
-          style={{
-            left: `${tooltipPct}%`,
-            top: tooltipAnchor.y,
-            transform: "translate(-50%, -50%)",
-          }}
-        >
-          <span
-            className="h-2 w-2 shrink-0 rounded-full"
-            style={{ backgroundColor: zones[hovered] }}
-          />
-          {ZONE_LABELS[hovered]}
-        </div>
-      )}
-    </div>
-  );
+  return fresh;
+}
+ 
+export const getIndexHistory = createServerFn({ method: "GET" })
+  .inputValidator((d: { symbol: string; range: "1M" | "1A" | "3A" | "5A" | "10A" }) =>
+    z
+      .object({
+        symbol: z.string().min(1),
+        range: z.enum(["1M", "1A", "3A", "5A", "10A"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }): Promise<Candle[]> => {
+    const days =
+      data.range === "1M"
+        ? 31
+        : data.range === "1A"
+          ? 366
+          : data.range === "3A"
+            ? 366 * 3
+            : data.range === "5A"
+              ? 366 * 5
+              : 366 * 10;
+    const cutoff = Date.now() - days * 86400_000;
+
+    // FMP free/Starter plan only guarantees ~5 years, so for 3A/5A/10A we prefer the
+    // Twelve Data + Supabase cache path (full history since listing, no extra cost) and
+    // fall back to FMP if that's unavailable.
+    let all: Candle[] | null = null;
+    if (data.range === "3A" || data.range === "5A" || data.range === "10A") {
+      all = await getCachedLongHistory(data.symbol);
+    }
+    if (!all || all.length === 0) {
+      const raw = await fmp<any[]>(
+        `/historical-price-eod/full?symbol=${encodeURIComponent(data.symbol)}`,
+      );
+      all = (raw ?? [])
+        .map((r) => ({
+          date: String(r.date),
+          open: Number(r.open),
+          high: Number(r.high),
+          low: Number(r.low),
+          close: Number(r.close),
+        }))
+        .reverse();
+    }
+
+    return all.filter((r) => new Date(r.date).getTime() >= cutoff);
+  });
+ 
+// ---------- Market news (Yahoo Finance RSS — FMP news endpoint restricted, Google News blocks article links) ----------
+export type NewsItem = { title: string; source: string; url: string; publishedAt: string };
+ 
+export const getMarketNews = createServerFn({ method: "GET" }).handler(
+  async (): Promise<NewsItem[]> => {
+const parseRss = (xml: string): NewsItem[] => {
+      const items: NewsItem[] = [];
+      const itemRe = /<item>([\s\S]*?)<\/item>/g;
+      const tag = (block: string, name: string) => {
+        const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`));
+        return m ? m[1].replace(/<!\[CDATA\[(.*?)\]\]>/s, "$1").trim() : "";
+      };
+      let m;
+      while ((m = itemRe.exec(xml))) {
+        const block = m[1];
+        const title = tag(block, "title");
+        const link = tag(block, "link");
+        const pub = tag(block, "pubDate");
+        const source = tag(block, "source") || "Yahoo Finance";
+        const pubMs = new Date(pub).getTime();
+        if (!title || !link || !isFinite(pubMs)) continue;
+        if (Date.now() - pubMs > 4 * 24 * 60 * 60 * 1000) continue;
+        items.push({ title, source, url: link, publishedAt: pub });
+      }
+      items.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      return items.slice(0, 5);
+    };
+ 
+    const sources = [
+      "https://finance.yahoo.com/news/rssindex",
+      "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+    ];
+ 
+    for (const src of sources) {
+      try {
+        const res = await fetch(src, { headers: { "User-Agent": "Mozilla/5.0" } });
+        if (!res.ok) continue;
+        const xml = await res.text();
+        const items = parseRss(xml);
+        if (items.length) return items;
+      } catch {
+        // try next source
+      }
+    }
+    return [];
+  },
+);
+ 
+// ---------- Stock fundamentals cache (7 days) ----------
+// Income statement, cash flow, balance sheet, key metrics, profile and analyst estimates
+// only change quarterly at most. Caching them for 7 days means cost scales with unique
+// tickers viewed per week, not with visitor count — the same Apple page can be viewed
+// 100,000 times in a week and only cost ~6 FMP calls total instead of 600,000.
+type RawFundamentals = {
+  quoteArr: any[];
+  profileArr: any[];
+  incomeArr: any[];
+  cashArr: any[];
+  balanceArr: any[];
+  keyMetricsArr: any[];
+  estimatesArr: any[];
+  ratiosArr: any[];
+};
+
+const FUNDAMENTALS_TTL_MS = 7 * 24 * 60 * 60_000; // 7 days
+
+async function fetchFundamentalsFromFmp(ticker: string): Promise<RawFundamentals> {
+  const [profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr] =
+    await Promise.all([
+      fmp<any[]>(`/profile?symbol=${ticker}`),
+      fmp<any[]>(`/income-statement?symbol=${ticker}&limit=5`),
+      fmp<any[]>(`/cash-flow-statement?symbol=${ticker}&limit=5`),
+      fmp<any[]>(`/balance-sheet-statement?symbol=${ticker}&limit=1`),
+      fmp<any[]>(`/key-metrics?symbol=${ticker}&limit=1`).catch(() => []),
+      fmp<any[]>(`/analyst-estimates?symbol=${ticker}&period=annual`).catch(() => []),
+      fmp<any[]>(`/ratios?symbol=${ticker}&limit=1`).catch(() => []),
+    ]);
+  // quote is fetched separately (always fresh) — store an empty array here, caller fills it in.
+  return { quoteArr: [], profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr };
 }
 
-function Field({
-  label,
-  value,
-  step,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  step: number;
-  onChange: (n: number) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      <Input
-        type="number"
-        value={Number.isFinite(value) ? value : ""}
-        step={step}
-        onChange={(e) => {
-          const v = e.target.value;
-          onChange(v === "" ? 0 : parseFloat(v));
-        }}
-      />
-    </div>
-  );
+async function getCachedFundamentals(ticker: string): Promise<RawFundamentals> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row } = await supabaseAdmin
+    .from("stock_fundamentals_cache")
+    .select("payload, updated_at")
+    .eq("ticker", ticker)
+    .maybeSingle();
+
+  const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < FUNDAMENTALS_TTL_MS;
+  if (isFresh) return row.payload as RawFundamentals;
+
+  try {
+    const fresh = await fetchFundamentalsFromFmp(ticker);
+    await supabaseAdmin
+      .from("stock_fundamentals_cache")
+      .upsert(
+        { ticker, payload: fresh, updated_at: new Date().toISOString() },
+        { onConflict: "ticker" },
+      );
+    return fresh;
+  } catch (err) {
+    // FMP failed (rate-limited, network issue) — serve stale cache if we have any, since
+    // fundamentals barely change week to week and a stale view beats a broken page.
+    if (row) return row.payload as RawFundamentals;
+    throw err;
+  }
 }
 
-function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div>
-      <div className="mb-2 text-sm font-semibold">{title}</div>
-      <div className="flex flex-col gap-1.5">{children}</div>
-    </div>
-  );
+
+// ---------- SEC EDGAR (free, official, no API key, 10+ years of history) ----------
+// Used only to extend the Revenue/FCF history chart beyond the ~5 years FMP's plan allows.
+// All other figures (current FCF, debt, cash, shares, growth estimates) still come from FMP.
+const EDGAR_TTL_MS = 30 * 24 * 60 * 60_000; // 30 days — annual filings barely change
+const EDGAR_HEADERS = { "User-Agent": "ValueScope contact@valuescope.app" };
+
+let tickerToCikCache: Record<string, string> | null = null;
+let tickerToCikPromise: Promise<Record<string, string>> | null = null;
+async function getCikForTicker(ticker: string): Promise<string | null> {
+  if (!tickerToCikCache) {
+    // Share the in-flight request so concurrent callers (history + balance snapshot, which
+    // now run in parallel) don't each trigger their own fetch of this large file.
+    if (!tickerToCikPromise) {
+      tickerToCikPromise = (async () => {
+        const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
+          headers: EDGAR_HEADERS,
+        });
+        if (!res.ok) return {};
+        const json = await res.json();
+        const map: Record<string, string> = {};
+        for (const row of Object.values(json) as any[]) {
+          if (row?.ticker)
+            map[String(row.ticker).toUpperCase()] = String(row.cik_str).padStart(10, "0");
+        }
+        return map;
+      })();
+    }
+    tickerToCikCache = await tickerToCikPromise;
+  }
+  return tickerToCikCache[ticker.toUpperCase()] ?? null;
 }
 
-function MetricRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 text-xs">
-      <span className="text-muted-foreground">{label}:</span>
-      <span className="font-medium">{value}</span>
-    </div>
-  );
+// Different companies tag the same line item with different XBRL concepts — try each in order.
+const REVENUE_TAGS = [
+  "Revenues",
+  "RevenueFromContractWithCustomerExcludingAssessedTax",
+  "RevenueFromContractWithCustomerIncludingAssessedTax",
+  "SalesRevenueNet",
+];
+const OPERATING_CF_TAGS = ["NetCashProvidedByUsedInOperatingActivities"];
+const CAPEX_TAGS = [
+  "PaymentsToAcquirePropertyPlantAndEquipment",
+  "PaymentsToAcquireProductiveAssets", // Amazon (and a few others) use this since FY2016
+  "PaymentsForCapitalImprovements",
+];
+
+async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<number, number>> {
+  // Returns a map of period-year -> value, using the first tag that has data for each year.
+  const out = new Map<number, { val: number; filed: string }>();
+  for (const tag of tags) {
+    try {
+      const res = await fetch(
+        `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
+        { headers: EDGAR_HEADERS },
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const usd = json?.units?.USD;
+      if (!Array.isArray(usd)) continue;
+      for (const entry of usd) {
+        // Only full-year 10-K figures (skip quarterly 10-Qs).
+        // IMPORTANT: the `fy` field is the *filing's* fiscal year label, not necessarily the
+        // year the figure covers — a 10-K commonly repeats prior-year comparatives under the
+        // same `fy`. The period's `end` date is the reliable way to know which year a duration
+        // fact actually belongs to.
+        if (entry.form !== "10-K" || entry.fp !== "FY") continue;
+        const end = String(entry.end ?? "");
+        const year = Number(end.slice(0, 4));
+        if (!year) continue;
+        const filed = String(entry.filed ?? "");
+        const existing = out.get(year);
+        // Companies sometimes restate prior years in later filings — keep the most recently
+        // filed value for each year rather than just the first one encountered.
+        if (!existing || filed > existing.filed) {
+          out.set(year, { val: Number(entry.val), filed });
+        }
+      }
+    } catch {
+      // try next tag
+    }
+  }
+  const simple = new Map<number, number>();
+  for (const [year, { val }] of out) simple.set(year, val);
+  return simple;
 }
 
-function fmtRatio(n: number | null): string {
-  return n != null ? `${n.toFixed(1)}` : "—";
+// Balance sheet items (debt, cash) are point-in-time "instant" facts, not period totals.
+// We want the single most recent reported value, from any filing (10-K or 10-Q).
+async function fetchEdgarLatestInstant(cik: string, tags: string[]): Promise<number | null> {
+  for (const tag of tags) {
+    try {
+      const res = await fetch(
+        `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
+        { headers: EDGAR_HEADERS },
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const usd = json?.units?.USD;
+      if (!Array.isArray(usd) || usd.length === 0) continue;
+      const sorted = usd.slice().sort((a: any, b: any) => String(b.end).localeCompare(String(a.end)));
+      const latest = sorted[0];
+      if (latest && latest.val != null) return Number(latest.val);
+    } catch {
+      // try next tag
+    }
+  }
+  return null;
 }
 
-function ChartCard({
-  title,
-  data,
-  isLoading,
-  dataKey,
-  currency,
-}: {
-  title: string;
-  data: { year: number; revenue: number; fcf: number }[] | undefined;
-  isLoading?: boolean;
-  dataKey: "revenue" | "fcf";
+const LONG_TERM_DEBT_TAGS = ["LongTermDebtNoncurrent", "LongTermDebt"];
+const SHORT_TERM_DEBT_TAGS = [
+  "LongTermDebtCurrent",
+  "ShortTermBorrowings",
+  "DebtCurrent",
+];
+const CASH_TAGS = [
+  "CashAndCashEquivalentsAtCarryingValue",
+  "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+];
+const SHARES_OUTSTANDING_TAGS = ["CommonStockSharesOutstanding"];
+
+type EdgarBalanceSnapshot = {
+  totalDebt: number | null;
+  cash: number | null;
+  sharesOutstanding: number | null;
+};
+
+async function fetchEdgarBalanceSnapshot(ticker: string): Promise<EdgarBalanceSnapshot | null> {
+  const cik = await getCikForTicker(ticker);
+  if (!cik) return null;
+  const [longTermDebt, shortTermDebt, cash, shares] = await Promise.all([
+    fetchEdgarLatestInstant(cik, LONG_TERM_DEBT_TAGS),
+    fetchEdgarLatestInstant(cik, SHORT_TERM_DEBT_TAGS),
+    fetchEdgarLatestInstant(cik, CASH_TAGS),
+    fetchEdgarLatestInstant(cik, SHARES_OUTSTANDING_TAGS),
+  ]);
+  const totalDebt =
+    longTermDebt != null || shortTermDebt != null ? (longTermDebt ?? 0) + (shortTermDebt ?? 0) : null;
+  return { totalDebt, cash, sharesOutstanding: shares };
+}
+
+type EdgarHistory = { year: number; revenue: number; fcf: number }[];
+
+async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | null> {
+  const cik = await getCikForTicker(ticker);
+  if (!cik) return null;
+  const [revenue, opCf, capex] = await Promise.all([
+    fetchEdgarConcept(cik, REVENUE_TAGS),
+    fetchEdgarConcept(cik, OPERATING_CF_TAGS),
+    fetchEdgarConcept(cik, CAPEX_TAGS),
+  ]);
+  if (revenue.size === 0) return null;
+  // If we found revenue but no CAPEX at all, none of our known tags matched this filer's
+  // taxonomy — silently treating missing CAPEX as 0 would inflate FCF (= OperatingCF - 0).
+  // Safer to bail out and let the caller fall back to FMP's pre-calculated FCF instead.
+  if (capex.size === 0) return null;
+
+  const years = Array.from(revenue.keys()).sort((a, b) => a - b);
+  const last10 = years.slice(-10);
+  return last10.map((year) => {
+    const op = opCf.get(year) ?? 0;
+    const cap = Math.abs(capex.get(year) ?? 0);
+    return { year, revenue: revenue.get(year) ?? 0, fcf: op - cap };
+  });
+}
+
+async function getCachedEdgarHistory(ticker: string): Promise<EdgarHistory | null> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data: row } = await supabaseAdmin
+    .from("edgar_history_cache")
+    .select("history, updated_at")
+    .eq("ticker", ticker)
+    .maybeSingle();
+
+  const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < EDGAR_TTL_MS;
+  if (isFresh) return row.history as EdgarHistory;
+
+  try {
+    const fresh = await fetchEdgarHistoryFresh(ticker);
+    if (fresh && fresh.length > 0) {
+      await supabaseAdmin
+        .from("edgar_history_cache")
+        .upsert(
+          { ticker, history: fresh, updated_at: new Date().toISOString() },
+          { onConflict: "ticker" },
+        );
+      return fresh;
+    }
+    return row ? (row.history as EdgarHistory) : null;
+  } catch {
+    return row ? (row.history as EdgarHistory) : null;
+  }
+}
+
+
+export type StockData = {
+  ticker: string;
+  companyName: string;
+  exchange: string;
   currency: string;
-}) {
-  return (
-    <div>
-      <div className="mb-3 text-sm font-semibold">{title}</div>
-      <div className="h-56">
-        {isLoading || !data ? (
-          <div className="h-full w-full animate-pulse rounded bg-muted/40" />
-        ) : (
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis dataKey="year" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-            <YAxis
-              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-              tickFormatter={(v) => fmtCompact(v, currency).replace(/[A-Z$€]/g, "")}
-              width={48}
-            />
-            <Tooltip
-              contentStyle={{
-                background: "var(--popover)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-              formatter={(v: number) => fmtCompact(v, currency)}
-            />
-            <Bar dataKey={dataKey} fill="var(--primary)" radius={[6, 6, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-        )}
-      </div>
-    </div>
-  );
-}
+  price: number;
+  changePercent: number;
+  logoUrl: string | null;
+  freeCashFlow: number;
+  operatingCashFlow: number;
+  capex: number;
+  meanCapex4y: number;
+  fcfAdjusted: number;
+  totalDebt: number;
+  cash: number;
+  sharesOutstanding: number;
+  peRatio: number | null;
+  peNtm: number | null;
+  roic: number | null;
+  baseGrowthRate: number;
+  history: { year: number; revenue: number; fcf: number }[];
+  warnings: string[];
+  // Valuation
+  marketCap: number | null;
+  priceToSales: number | null;
+  evToEBITDA: number | null;
+  priceToBook: number | null;
+  // Cash Flow
+  freeCashFlowYield: number | null;
+  freeCashFlowPerShare: number | null;
+  // Margins & Growth
+  netProfitMargin: number | null;
+  operatingProfitMargin: number | null;
+  revenueGrowthYoY: number | null;
+  netIncomeGrowthYoY: number | null;
+  // Dividend
+  dividendYield: number | null;
+  dividendPayoutRatio: number | null;
+};
+ 
+export const getStockData = createServerFn({ method: "GET" })
+  .inputValidator((d: { ticker: string }) =>
+    z.object({ ticker: z.string().min(1).max(15) }).parse(d),
+  )
+  .handler(async ({ data }): Promise<StockData> => {
+    const t = data.ticker.toUpperCase();
+    const warnings: string[] = [];
 
-function StockSkeleton() {
-  return (
-    <div className="mx-auto max-w-[1400px] px-4 pb-20 pt-6 sm:px-6 lg:px-10">
-      <Skeleton className="h-6 w-20" />
-      <Skeleton className="mt-4 h-8 w-2/3" />
-      <Skeleton className="mt-2 h-8 w-40" />
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <Skeleton className="h-32" />
-        <Skeleton className="h-32" />
-      </div>
-      <Skeleton className="mt-6 h-40" />
-      <Skeleton className="mt-6 h-40" />
-    </div>
-  );
-}
+    const [quoteArr, fundamentals, edgarBalance] = await Promise.all([
+      fmp<any[]>(`/quote?symbol=${t}`), // always fresh — price changes constantly
+      getCachedFundamentals(t), // cached up to 7 days — income/cashflow/balance/profile/estimates
+      fetchEdgarBalanceSnapshot(t).catch(() => null), // free EDGAR debt/cash — affects the DCF, needed now
+      // Note: the 10-year revenue/FCF history chart is fetched separately via getStockHistory()
+      // so the slower SEC EDGAR roundtrip never blocks the main page (price, DCF, metrics).
+    ]);
+    const { profileArr, incomeArr, cashArr, balanceArr, keyMetricsArr, estimatesArr, ratiosArr } = fundamentals;
+ 
+    if (!quoteArr?.length) throw new Error("Ticker não encontrado");
+    const quote = quoteArr[0];
+    const profile = profileArr?.[0] ?? {};
+    const cash0 = cashArr?.[0];
+    const balance0 = balanceArr?.[0];
+    if (!cash0 || !balance0) throw new Error("Dados financeiros indisponíveis");
+ 
+    const freeCashFlow = Number(cash0.freeCashFlow ?? 0);
+    const operatingCashFlow = Number(cash0.operatingCashFlow ?? 0);
+    const capex = Math.abs(Number(cash0.capitalExpenditure ?? 0));
+    const last4 = cashArr.slice(0, 4);
+    const meanCapex4y =
+      last4.length > 0
+        ? last4.reduce((s, c) => s + Math.abs(Number(c.capitalExpenditure ?? 0)), 0) / last4.length
+        : capex;
+    const fcfAdjusted = operatingCashFlow - meanCapex4y;
+ 
+const rawTotalDebt = balance0.totalDebt;
+    const fmpTotalDebt =
+      typeof rawTotalDebt === "number" && rawTotalDebt > 0
+        ? rawTotalDebt
+        : typeof rawTotalDebt === "string" && Number(rawTotalDebt) > 0
+          ? Number(rawTotalDebt)
+          : Number(balance0.shortTermDebt ?? 0) + Number(balance0.longTermDebt ?? 0);
+    const fmpCashBs = Number(
+      balance0.cashAndShortTermInvestments ?? balance0.cashAndCashEquivalents ?? 0,
+    );
+
+    // Prefer SEC EDGAR for debt/cash when available — it's the free, official, primary source
+    // and avoids relying on FMP's pre-aggregated totalDebt field (which we've seen be
+    // inconsistent in the past). Falls back to FMP's figures for non-US filers or on failure.
+    const totalDebt = edgarBalance?.totalDebt ?? fmpTotalDebt;
+    const cashBs = edgarBalance?.cash ?? fmpCashBs;
+
+    const sharesOutstanding =
+      Number(quote.marketCap && quote.price ? quote.marketCap / quote.price : 0) ||
+      Number(profile.mktCap && quote.price ? profile.mktCap / quote.price : 0) ||
+      Number(keyMetricsArr?.[0]?.sharesOutstanding) ||
+      Number(quote.sharesOutstanding);
+
+    if (!sharesOutstanding) throw new Error("Número de ações indisponível");
+ 
+   // Growth rate from analyst estimates: avg of next ~5y EPS growth
+    // (Finviz/Zacks/GF "5-year growth rate" is typically EPS-based, not revenue-based)
+    let baseGrowthRate = 0;
+    const epsEst = (e: any) =>
+      Number(e.epsAvg ?? e.estimatedEpsAvg ?? 0);
+    const revEst = (e: any) =>
+      Number(e.revenueAvg ?? e.estimatedRevenueAvg ?? e.revenueHigh ?? 0);
+    if (Array.isArray(estimatesArr) && estimatesArr.length) {
+      const currentYear = new Date().getFullYear();
+      const future = estimatesArr
+        .filter((e) => {
+          const y = Number(String(e.date ?? "").slice(0, 4));
+          return y >= currentYear && y <= currentYear + 5;
+        })
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+ 
+      const futureEps = future.filter((e) => epsEst(e) > 0);
+      if (futureEps.length >= 2) {
+        const rates: number[] = [];
+        for (let i = 1; i < futureEps.length; i++) {
+          const prev = epsEst(futureEps[i - 1]);
+          const curr = epsEst(futureEps[i]);
+          if (prev > 0 && curr > 0) rates.push(curr / prev - 1);
+        }
+        if (rates.length) baseGrowthRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+      }
+      if (!baseGrowthRate || !isFinite(baseGrowthRate)) {
+        const futureRev = future.filter((e) => revEst(e) > 0);
+        if (futureRev.length >= 2) {
+          const rates: number[] = [];
+          for (let i = 1; i < futureRev.length; i++) {
+            const prev = revEst(futureRev[i - 1]);
+            const curr = revEst(futureRev[i]);
+            if (prev > 0 && curr > 0) rates.push(curr / prev - 1);
+          }
+          if (rates.length) baseGrowthRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+        }
+      }
+    }
+
+    // PE NTM (next twelve months) — current price divided by the next fiscal year's
+    // estimated EPS, using the same analyst estimates already fetched for the growth rate.
+    let peNtm: number | null = null;
+    if (Array.isArray(estimatesArr) && estimatesArr.length) {
+      const currentYear = new Date().getFullYear();
+      const nextYearEstimates = estimatesArr
+        .filter((e: any) => {
+          const y = Number(String(e.date ?? "").slice(0, 4));
+          return y >= currentYear && epsEst(e) > 0;
+        })
+        .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)));
+      const nextEps = nextYearEstimates[0] ? epsEst(nextYearEstimates[0]) : 0;
+      if (nextEps > 0 && quote.price) {
+        peNtm = Number(quote.price) / nextEps;
+      }
+    }
+
+    if (freeCashFlow < 0)
+      warnings.push("FCF negativo — o cálculo pode não ser fiável.");
+ 
+    const fmpHistory = incomeArr
+      .slice()
+      .reverse()
+      .map((inc) => {
+        const year = Number(String(inc.date ?? "").slice(0, 4)) || 0;
+        const matchingCash = cashArr.find((c) => String(c.date).slice(0, 4) === String(year));
+        return {
+          year,
+          revenue: Number(inc.revenue ?? 0),
+          fcf: Number(matchingCash?.freeCashFlow ?? 0),
+        };
+      })
+      .filter((h) => h.year > 0);
+
+    // Use SEC EDGAR if it has more years than FMP's plan provides (typically true for US
+    // filers); falls back to FMP's ~5 years for non-US tickers or if EDGAR fails.
+    const history = fmpHistory;
+ 
+    const ratios0 = ratiosArr?.[0] ?? {};
+    const km0 = keyMetricsArr?.[0] ?? {};
+
+    // YoY growth from the two most recent annual income statements (incomeArr is newest-first).
+    const revenueGrowthYoY =
+      incomeArr.length >= 2 && Number(incomeArr[1].revenue) > 0
+        ? (Number(incomeArr[0].revenue) - Number(incomeArr[1].revenue)) / Number(incomeArr[1].revenue)
+        : null;
+    const netIncomeGrowthYoY =
+      incomeArr.length >= 2 && Number(incomeArr[1].netIncome) !== 0
+        ? (Number(incomeArr[0].netIncome) - Number(incomeArr[1].netIncome)) /
+          Math.abs(Number(incomeArr[1].netIncome))
+        : null;
+
+    return {
+      ticker: t,
+      companyName: profile.companyName ?? quote.name ?? t,
+      exchange: profile.exchangeShortName ?? quote.exchange ?? "",
+      currency: profile.currency ?? "USD",
+      price: Number(quote.price ?? 0),
+      changePercent: Number(quote.changePercentage ?? quote.changesPercentage ?? 0),
+      logoUrl: profile.image || null,
+      freeCashFlow,
+      operatingCashFlow,
+      capex,
+      meanCapex4y,
+      fcfAdjusted,
+      totalDebt,
+      cash: cashBs,
+      sharesOutstanding,
+      peRatio: ratios0.priceToEarningsRatio != null ? Number(ratios0.priceToEarningsRatio) : null,
+      peNtm,
+      roic: km0.roic != null ? Number(km0.roic) : null,
+      baseGrowthRate,
+      history,
+      warnings,
+      marketCap: km0.marketCap != null ? Number(km0.marketCap) : (quote.marketCap ?? null),
+      priceToSales: ratios0.priceToSalesRatio != null ? Number(ratios0.priceToSalesRatio) : null,
+      evToEBITDA: km0.evToEBITDA != null ? Number(km0.evToEBITDA) : null,
+      priceToBook: ratios0.priceToBookRatio != null ? Number(ratios0.priceToBookRatio) : null,
+      freeCashFlowYield: km0.freeCashFlowYield != null ? Number(km0.freeCashFlowYield) : null,
+      freeCashFlowPerShare:
+        ratios0.freeCashFlowPerShare != null ? Number(ratios0.freeCashFlowPerShare) : null,
+      netProfitMargin: ratios0.netProfitMargin != null ? Number(ratios0.netProfitMargin) : null,
+      operatingProfitMargin:
+        ratios0.operatingProfitMargin != null ? Number(ratios0.operatingProfitMargin) : null,
+      revenueGrowthYoY,
+      netIncomeGrowthYoY,
+      dividendYield: ratios0.dividendYield != null ? Number(ratios0.dividendYield) : null,
+      dividendPayoutRatio:
+        ratios0.dividendPayoutRatio != null ? Number(ratios0.dividendPayoutRatio) : null,
+    };
+  });
+
+// ---------- Stock history (lazy-loaded, separate from getStockData) ----------
+// Fetched on-demand by the chart component after the main page has already rendered,
+// so the slower SEC EDGAR roundtrip never delays price/DCF/metrics from showing up.
+export const getStockHistory = createServerFn({ method: "GET" })
+  .inputValidator((d: { ticker: string }) =>
+    z.object({ ticker: z.string().min(1).max(15) }).parse(d),
+  )
+  .handler(async ({ data }): Promise<{ year: number; revenue: number; fcf: number }[]> => {
+    const t = data.ticker.toUpperCase();
+
+    const [fundamentals, edgarHistory] = await Promise.all([
+      getCachedFundamentals(t), // same 7-day cache getStockData uses — no extra FMP cost
+      getCachedEdgarHistory(t).catch(() => null),
+    ]);
+    const { incomeArr, cashArr } = fundamentals;
+
+    const fmpHistory = incomeArr
+      .slice()
+      .reverse()
+      .map((inc: any) => {
+        const year = Number(String(inc.date ?? "").slice(0, 4)) || 0;
+        const matchingCash = cashArr.find((c: any) => String(c.date).slice(0, 4) === String(year));
+        return {
+          year,
+          revenue: Number(inc.revenue ?? 0),
+          fcf: Number(matchingCash?.freeCashFlow ?? 0),
+        };
+      })
+      .filter((h) => h.year > 0);
+
+    // Prefer SEC EDGAR when it covers more years than FMP's plan allows.
+    return edgarHistory && edgarHistory.length > fmpHistory.length ? edgarHistory : fmpHistory;
+  });
