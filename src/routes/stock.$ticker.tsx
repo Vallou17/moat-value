@@ -242,7 +242,7 @@ const defaults = useMemo(
                 ) : (
                   <ArrowDownRight className="h-4 w-4" />
                 )}
-                {fmtPct(data.changePercent, 2)}
+                {fmtPct(data.changePercent, 1)}
               </span>
             </div>
           </div>
@@ -315,8 +315,8 @@ const defaults = useMemo(
               <MetricRow label="Capitalização Bolsista" value={data.marketCap != null ? fmtCompact(data.marketCap, data.currency) : "—"} />
               <MetricRow
                 label="P/E (TTM | NTM)"
-                value={`${data.peRatio != null ? data.peRatio.toFixed(2) : "—"} | ${
-                  data.peNtm != null ? data.peNtm.toFixed(2) : "—"
+                value={`${data.peRatio != null ? data.peRatio.toFixed(1) : "—"} | ${
+                  data.peNtm != null ? data.peNtm.toFixed(1) : "—"
                 }`}
               />
               <MetricRow label="Price to Sales" value={fmtRatio(data.priceToSales)} />
@@ -328,32 +328,32 @@ const defaults = useMemo(
               <MetricRow label="Free Cash Flow" value={fmtCompact(data.freeCashFlow, data.currency)} />
               <MetricRow
                 label="FCF Yield"
-                value={data.freeCashFlowYield != null ? fmtPct(data.freeCashFlowYield * 100, 2) : "—"}
+                value={data.freeCashFlowYield != null ? fmtPct(data.freeCashFlowYield * 100, 1) : "—"}
               />
               <MetricRow
                 label="FCF por Ação"
                 value={data.freeCashFlowPerShare != null ? fmtMoney(data.freeCashFlowPerShare, data.currency) : "—"}
               />
               <MetricRow label="CAPEX (último ano)" value={fmtCompact(data.capex, data.currency)} />
-              <MetricRow label="CAPEX Médio 4A" value={fmtCompact(data.meanCapex4y, data.currency)} />
+              <MetricRow label="CAPEX Médio (últimos 4 anos)" value={fmtCompact(data.meanCapex4y, data.currency)} />
             </MetricGroup>
 
             <MetricGroup title="Margens e Crescimento">
               <MetricRow
                 label="Margem de Lucro"
-                value={data.netProfitMargin != null ? fmtPct(data.netProfitMargin * 100, 2) : "—"}
+                value={data.netProfitMargin != null ? fmtPct(data.netProfitMargin * 100, 1) : "—"}
               />
               <MetricRow
                 label="Margem Operacional"
-                value={data.operatingProfitMargin != null ? fmtPct(data.operatingProfitMargin * 100, 2) : "—"}
+                value={data.operatingProfitMargin != null ? fmtPct(data.operatingProfitMargin * 100, 1) : "—"}
               />
               <MetricRow
                 label="Receita (YoY)"
-                value={data.revenueGrowthYoY != null ? fmtPct(data.revenueGrowthYoY * 100, 2) : "—"}
+                value={data.revenueGrowthYoY != null ? fmtPct(data.revenueGrowthYoY * 100, 1) : "—"}
               />
               <MetricRow
                 label="Lucro Líquido (YoY)"
-                value={data.netIncomeGrowthYoY != null ? fmtPct(data.netIncomeGrowthYoY * 100, 2) : "—"}
+                value={data.netIncomeGrowthYoY != null ? fmtPct(data.netIncomeGrowthYoY * 100, 1) : "—"}
               />
             </MetricGroup>
 
@@ -370,33 +370,32 @@ const defaults = useMemo(
             <MetricGroup title="Dividendos">
               <MetricRow
                 label="Dividend Yield"
-                value={data.dividendYield != null ? fmtPct(data.dividendYield * 100, 2) : "—"}
+                value={data.dividendYield != null ? fmtPct(data.dividendYield * 100, 1) : "—"}
               />
               <MetricRow
                 label="Payout Ratio"
-                value={data.dividendPayoutRatio != null ? fmtPct(data.dividendPayoutRatio * 100, 2) : "—"}
+                value={data.dividendPayoutRatio != null ? fmtPct(data.dividendPayoutRatio * 100, 1) : "—"}
               />
             </MetricGroup>
           </div>
-        </Card>
-      </section>
 
-      {/* Charts */}
-      <section className="mt-6 grid gap-4 lg:grid-cols-2">
-        <ChartCard
-          title="Receita (últimos anos)"
-          data={historyQuery.data}
-          isLoading={historyQuery.isLoading}
-          dataKey="revenue"
-          currency={data.currency}
-        />
-        <ChartCard
-          title="Free Cash Flow (últimos anos)"
-          data={historyQuery.data}
-          isLoading={historyQuery.isLoading}
-          dataKey="fcf"
-          currency={data.currency}
-        />
+          <div className="mt-6 grid gap-4 border-t border-border/60 pt-6 lg:grid-cols-2">
+            <ChartCard
+              title="Receita (últimos anos)"
+              data={historyQuery.data}
+              isLoading={historyQuery.isLoading}
+              dataKey="revenue"
+              currency={data.currency}
+            />
+            <ChartCard
+              title="Free Cash Flow (últimos anos)"
+              data={historyQuery.data}
+              isLoading={historyQuery.isLoading}
+              dataKey="fcf"
+              currency={data.currency}
+            />
+          </div>
+        </Card>
       </section>
 
       {/* Moat (placeholder) */}
@@ -680,7 +679,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 }
 
 function fmtRatio(n: number | null): string {
-  return n != null ? `${n.toFixed(2)}` : "—";
+  return n != null ? `${n.toFixed(1)}` : "—";
 }
 
 function ChartCard({
@@ -697,10 +696,8 @@ function ChartCard({
   currency: string;
 }) {
   return (
-    <Card className="p-4 sm:p-5">
-      <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
-        <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> {title}
-      </h2>
+    <div>
+      <div className="mb-3 text-sm font-semibold">{title}</div>
       <div className="h-56">
         {isLoading || !data ? (
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
@@ -728,7 +725,7 @@ function ChartCard({
         </ResponsiveContainer>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
 
