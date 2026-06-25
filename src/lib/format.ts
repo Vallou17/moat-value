@@ -10,12 +10,29 @@ export function fmtMoney(n: number, currency = "USD"): string {
 
 export function fmtCompact(n: number, currency = "USD"): string {
   if (!isFinite(n) || n === 0) return "—";
-  return new Intl.NumberFormat("pt-PT", {
-    style: "currency",
-    currency,
-    notation: "compact",
-    maximumFractionDigits: 2,
-  }).format(n);
+  const symbol = currency === "USD" ? "$" : currency === "EUR" ? "€" : currency;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  let value: number;
+  let suffix: string;
+  if (abs >= 1e12) {
+    value = abs / 1e12;
+    suffix = "T";
+  } else if (abs >= 1e9) {
+    value = abs / 1e9;
+    suffix = "B";
+  } else if (abs >= 1e6) {
+    value = abs / 1e6;
+    suffix = "M";
+  } else if (abs >= 1e3) {
+    value = abs / 1e3;
+    suffix = "K";
+  } else {
+    value = abs;
+    suffix = "";
+  }
+  const formatted = value.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
+  return `${sign}${symbol}${formatted}${suffix}`;
 }
 
 export function fmtPct(n: number, digits = 1): string {
