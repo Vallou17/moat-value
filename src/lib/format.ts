@@ -3,8 +3,8 @@ export function fmtMoney(n: number, currency = "USD"): string {
   return new Intl.NumberFormat("pt-PT", {
     style: "currency",
     currency,
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1,
   }).format(n);
 }
 
@@ -31,7 +31,7 @@ export function fmtCompact(n: number, currency = "USD"): string {
     value = abs;
     suffix = "";
   }
-  const formatted = value.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
+  const formatted = value.toLocaleString("pt-PT", { maximumFractionDigits: 1 });
   return `${sign}${symbol}${formatted}${suffix}`;
 }
 
@@ -42,7 +42,7 @@ export function fmtPct(n: number, digits = 1): string {
 
 export function fmtNumber(n: number): string {
   if (!isFinite(n)) return "—";
-  return new Intl.NumberFormat("pt-PT", { notation: "compact", maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat("pt-PT", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 }
 
 const RECENT_KEY = "vs:recent";
