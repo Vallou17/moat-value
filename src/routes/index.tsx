@@ -56,8 +56,15 @@ function Home() {
         {/* Hero */}
         <section className="mx-auto max-w-3xl pt-6 text-center sm:pt-16">
           <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-5xl">
-            Sabes se uma ação está <span className="text-primary">valorizada</span> ou{" "}
-            <span className="text-primary">desvalorizada</span>?
+            Sabes se uma ação está{" "}
+            <span className="bg-gradient-to-br from-[#B794F4] to-[#4F46E5] bg-clip-text text-transparent">
+              valorizada
+            </span>{" "}
+            ou{" "}
+            <span className="bg-gradient-to-br from-[#B794F4] to-[#4F46E5] bg-clip-text text-transparent">
+              desvalorizada
+            </span>
+            ?
           </h1>
           <p className="mx-auto mt-3 whitespace-nowrap text-[11px] text-muted-foreground sm:max-w-xl sm:whitespace-normal sm:text-base">
             Pesquisa qualquer ação e fica a conhecer o seu valor intrínseco.
