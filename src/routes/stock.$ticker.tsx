@@ -23,7 +23,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { getStockData, getStockHistory, type StockData } from "@/lib/fmp.functions";
+import { getStockData, getStockHistory, type StockData, type StockHistoryResponse } from "@/lib/fmp.functions";
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { computeDcf, discountPremiumPct } from "@/lib/dcf";
 import { fmtMoney, fmtPct, fmtCompact, pushRecent } from "@/lib/format";
@@ -95,7 +95,7 @@ function StockView({
   historyQuery,
 }: {
   data: StockData;
-  historyQuery: UseQueryResult<{ year: number; revenue: number; fcf: number }[]>;
+  historyQuery: UseQueryResult<StockHistoryResponse>;
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -382,14 +382,14 @@ const defaults = useMemo(
           <div className="mt-6 grid gap-4 border-t border-border/60 pt-6 lg:grid-cols-2">
             <ChartCard
               title="Receita"
-              data={historyQuery.data}
+              history={historyQuery.data}
               isLoading={historyQuery.isLoading}
               dataKey="revenue"
               currency={data.currency}
             />
             <ChartCard
               title="Free Cash Flow"
-              data={historyQuery.data}
+              history={historyQuery.data}
               isLoading={historyQuery.isLoading}
               dataKey="fcf"
               currency={data.currency}
@@ -713,32 +713,78 @@ function makeHighlightBar(activeIndex: number | null) {
   };
 }
 
+type Granularity = "annual" | "quarterly";
+
 function ChartCard({
   title,
-  data,
+  history,
   isLoading,
   dataKey,
   currency,
 }: {
   title: string;
-  data: { year: number; revenue: number; fcf: number }[] | undefined;
+  history: StockHistoryResponse | undefined;
   isLoading?: boolean;
   dataKey: "revenue" | "fcf";
   currency: string;
 }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [granularity, setGranularity] = useState<Granularity>("annual");
   const seriesName = dataKey === "revenue" ? "Receita" : "FCF";
+
+  const hasQuarterly = (history?.quarterly?.length ?? 0) > 0;
+  // Fall back to annual if quarterly was requested but isn't available for this ticker
+  // (e.g. non-US filers that don't report 10-Qs to the SEC) rather than show an empty chart.
+  const effectiveGranularity: Granularity = granularity === "quarterly" && hasQuarterly ? "quarterly" : "annual";
+
+  const chartData = useMemo(() => {
+    if (!history) return [];
+    if (effectiveGranularity === "quarterly") {
+      return history.quarterly.map((q) => ({
+        label: `T${q.quarter} ${String(q.year).slice(2)}`,
+        revenue: q.revenue,
+        fcf: q.fcf,
+      }));
+    }
+    return history.annual.map((a) => ({
+      label: String(a.year),
+      revenue: a.revenue,
+      fcf: a.fcf,
+    }));
+  }, [history, effectiveGranularity]);
 
   return (
     <div>
-      <div className="mb-3 text-sm font-semibold">{title}</div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold">{title}</div>
+        <div className="flex gap-1">
+          <Button
+            variant={effectiveGranularity === "annual" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => setGranularity("annual")}
+          >
+            Anual
+          </Button>
+          <Button
+            variant={effectiveGranularity === "quarterly" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            disabled={!hasQuarterly}
+            title={hasQuarterly ? undefined : "Dados trimestrais indisponíveis para esta ação"}
+            onClick={() => setGranularity("quarterly")}
+          >
+            Trimestral
+          </Button>
+        </div>
+      </div>
       <div className="h-56">
-        {isLoading || !data ? (
+        {isLoading || !history ? (
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
         ) : (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={data}
+            data={chartData}
             margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
             onMouseMove={(state: any) => {
               if (state?.isTooltipActive && typeof state.activeTooltipIndex === "number") {
@@ -750,7 +796,7 @@ function ChartCard({
             onMouseLeave={() => setActiveIndex(null)}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis dataKey="year" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
             <YAxis
               tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
               tickFormatter={(v) => fmtCompact(v, currency).replace(/[A-Z$€]/g, "")}
