@@ -13,6 +13,8 @@ import {
   Star,
   AlertTriangle,
   ChevronDown,
+  Receipt,
+  Banknote,
 } from "lucide-react";
 import {
   Bar,
@@ -731,6 +733,7 @@ function ChartCard({
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [granularity, setGranularity] = useState<Granularity>("annual");
   const seriesName = dataKey === "revenue" ? "Receita" : "FCF";
+  const TitleIcon = dataKey === "revenue" ? Receipt : Banknote;
 
   const hasQuarterly = (history?.quarterly?.length ?? 0) > 0;
   // Fall back to annual if quarterly was requested but isn't available for this ticker
@@ -755,8 +758,11 @@ function ChartCard({
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm font-semibold">{title}</div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1.5 sm:px-2">
+        <div className="flex items-center gap-1.5 text-sm font-semibold">
+          <TitleIcon className="h-4 w-4 shrink-0 text-primary" />
+          {title}
+        </div>
         <div className="flex gap-1">
           <Button
             variant={effectiveGranularity === "annual" ? "secondary" : "ghost"}
@@ -796,10 +802,15 @@ function ChartCard({
             onMouseLeave={() => setActiveIndex(null)}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+              tickLine={false}
+            />
             <YAxis
               tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
               tickFormatter={(v) => fmtCompact(v, currency).replace(/[A-Z$€]/g, "")}
+              tickLine={false}
               width={48}
             />
             <Tooltip
