@@ -435,6 +435,22 @@ const defaults = useMemo(
             empresa - análise gerada por Inteligência Artificial
           </h2>
 
+          {/* TEMPORARY DIAGNOSTIC — remove once the caching behaviour is confirmed correct. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[11px]">
+            <span className="font-mono">
+              [DEBUG] generatedAt: {moatQuery.data?.generatedAt ?? "—"} | fetchedAt:{" "}
+              {new Date().toISOString()} | status: {moatQuery.status}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => moatQuery.refetch()}
+            >
+              Forçar refetch
+            </Button>
+          </div>
+
           {moatQuery.isLoading ? (
             <div className="flex flex-col gap-3">
               {Array.from({ length: 5 }).map((_, i) => (
