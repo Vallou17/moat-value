@@ -431,12 +431,12 @@ const defaults = useMemo(
       <section className="mt-6">
         <Card className="p-4 sm:p-5">
           <h2 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
-            <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Análise de
-            Moat (IA)
+            <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> MOAT da
+            empresa, gerada por Inteligência Artificial
           </h2>
 
           {moatQuery.isLoading ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex flex-col gap-3">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="h-24 animate-pulse rounded-lg bg-muted/40" />
               ))}
@@ -447,20 +447,12 @@ const defaults = useMemo(
               tarde.
             </p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex flex-col gap-3">
               {moatQuery.data.categories.map((c) => (
                 <MoatCategoryCard key={c.category} result={c} />
               ))}
             </div>
           )}
-          <p className="mt-4 flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
-            <Info className="mt-[1px] h-3 w-3 shrink-0" />
-            <span>
-              Análise gerada por IA com base no conhecimento geral sobre a empresa, sem acesso
-              a dados financeiros em tempo real — serve como ponto de partida, não como
-              recomendação de investimento.
-            </span>
-          </p>
         </Card>
       </section>
     </div>
