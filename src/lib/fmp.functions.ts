@@ -1224,9 +1224,6 @@ export const getMoatAnalysis = createServerFn({ method: "GET" })
     setResponseHeaders(new Headers({ "Cache-Control": "no-store" }));
 
     const t = data.ticker.toUpperCase();
-    // TEMPORARY DIAGNOSTIC LOG — remove once the caching mystery is resolved.
-    console.log(`[MOAT] handler invoked for ${t} at ${new Date().toISOString()}`);
-
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: row, error: selectError } = await supabaseAdmin
@@ -1235,17 +1232,14 @@ export const getMoatAnalysis = createServerFn({ method: "GET" })
       .eq("ticker", t)
       .maybeSingle();
     if (selectError) {
-      console.log(`[MOAT] select error for ${t}:`, selectError);
+      console.error(`moat_analysis_cache select failed for ${t}:`, selectError);
     }
-    console.log(`[MOAT] cache row for ${t}:`, row ? `found, updated_at=${row.updated_at}` : "not found");
 
     const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < MOAT_TTL_MS;
     if (isFresh) {
-      console.log(`[MOAT] serving fresh cache for ${t}, no Gemini call`);
       return { ticker: t, categories: row.categories as MoatCategoryResult[], generatedAt: row.updated_at };
     }
 
-    console.log(`[MOAT] cache miss/stale for ${t}, calling Gemini`);
     try {
       const categories = await fetchMoatAnalysisFromGemini(
         t,
@@ -1253,23 +1247,18 @@ export const getMoatAnalysis = createServerFn({ method: "GET" })
         data.sector ?? null,
         data.industry ?? null,
       );
-      console.log(`[MOAT] Gemini returned ${categories.length} categories for ${t}, writing to cache`);
       const generatedAt = new Date().toISOString();
-      const { error: upsertError, data: upsertData } = await supabaseAdmin
+      const { error: upsertError } = await supabaseAdmin
         .from("moat_analysis_cache")
-        .upsert({ ticker: t, categories, updated_at: generatedAt }, { onConflict: "ticker" })
-        .select();
+        .upsert({ ticker: t, categories, updated_at: generatedAt }, { onConflict: "ticker" });
       if (upsertError) {
         // Don't fail the request over a cache-write error — we still have a fresh analysis
         // to return. But log it loudly: a silent failure here means we re-call Gemini (and
         // re-bill the rate limit) on every single visit instead of once per 30 days.
-        console.error(`[MOAT] upsert FAILED for ${t}:`, JSON.stringify(upsertError));
-      } else {
-        console.log(`[MOAT] upsert OK for ${t}, rows written:`, JSON.stringify(upsertData));
+        console.error(`moat_analysis_cache upsert failed for ${t}:`, upsertError);
       }
       return { ticker: t, categories, generatedAt };
     } catch (err) {
-      console.error(`[MOAT] Gemini call threw for ${t}:`, err);
       // Gemini failed (rate-limited, malformed JSON, etc.) — serve stale cache if we have
       // any, since a 30-day-old qualitative moat read is still far more useful than an error.
       if (row) {
