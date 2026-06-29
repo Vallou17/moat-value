@@ -753,6 +753,8 @@ export type StockData = {
   companyName: string;
   exchange: string;
   currency: string;
+  sector: string | null;
+  industry: string | null;
   price: number;
   changePercent: number;
   logoUrl: string | null;
@@ -942,6 +944,8 @@ const rawTotalDebt = balance0.totalDebt;
     return {
       ticker: t,
       companyName: profile.companyName ?? quote.name ?? t,
+      sector: profile.sector || null,
+      industry: profile.industry || null,
       exchange: profile.exchangeShortName ?? quote.exchange ?? "",
       currency: profile.currency ?? "USD",
       price: Number(quote.price ?? 0),
@@ -1026,4 +1030,195 @@ export const getStockHistory = createServerFn({ method: "GET" })
     const annual = edgarAnnual && edgarAnnual.length > fmpAnnual.length ? edgarAnnual : fmpAnnual;
 
     return { annual, quarterly: edgarHistory?.quarterly ?? [] };
+  });
+
+// ---------- Moat analysis (AI-generated, Google Gemini) ----------
+// Classifies a company's competitive moat across 5 fixed categories, each scored 1-10
+// with a short explanation. Generated purely from the model's own knowledge of the
+// company (name + sector/industry) — no financial data is sent, by design, since the
+// goal is a qualitative read on competitive position, not a restatement of the numbers
+// already shown elsewhere on the page.
+const MOAT_CATEGORIES = [
+  "Lealdade à Marca e Poder de Pricing",
+  "Elevadas Barreiras à Entrada",
+  "Custos Elevados de Mudança para os Clientes",
+  "Efeito de Network",
+  "Economias de Escala",
+] as const;
+
+export type MoatCategoryResult = {
+  category: string;
+  score: number; // 1-10
+  explanation: string;
+};
+
+export type MoatAnalysis = {
+  ticker: string;
+  categories: MoatCategoryResult[];
+  generatedAt: string;
+};
+
+function geminiKey() {
+  const k = process.env.GEMINI_API_KEY;
+  if (!k) throw new Error("Chave GEMINI_API_KEY não configurada no servidor.");
+  return k;
+}
+
+const MOAT_TTL_MS = 30 * 24 * 60 * 60_000; // 30 days — qualitative moat read changes slowly
+
+// JSON schema handed to Gemini's `responseSchema` so the model is constrained to return
+// exactly 5 objects, one per category, in the fixed order we asked for — rather than
+// hoping a free-text response happens to mention all 5 and parsing it with regex.
+function buildMoatSchema() {
+  return {
+    type: "OBJECT",
+    properties: {
+      categories: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            category: { type: "STRING", enum: MOAT_CATEGORIES as unknown as string[] },
+            score: { type: "INTEGER", description: "Nota de 1 (sem moat) a 10 (moat muito forte)." },
+            explanation: { type: "STRING", description: "Explicação breve, 1-2 frases, em português europeu." },
+          },
+          required: ["category", "score", "explanation"],
+        },
+      },
+    },
+    required: ["categories"],
+  };
+}
+
+function buildMoatPrompt(companyName: string, sector: string | null, industry: string | null): string {
+  const sectorLine =
+    sector || industry
+      ? `Setor: ${sector ?? "desconhecido"}. Indústria: ${industry ?? "desconhecida"}.`
+      : "Setor e indústria desconhecidos — usa o teu conhecimento sobre a empresa para os inferir.";
+  return `Analisa o "moat" (vantagem competitiva sustentável) da empresa "${companyName}".
+${sectorLine}
+
+Classifica a empresa nas seguintes 5 categorias, cada uma com uma nota de 1 a 10
+(1 = sem vantagem nesta categoria, 10 = vantagem muito forte e duradoura) e uma
+explicação breve (1-2 frases, em português europeu):
+
+${MOAT_CATEGORIES.map((c, i) => `${i + 1}. ${c}`).join("\n")}
+
+Baseia a tua análise no teu conhecimento geral sobre esta empresa e o seu setor de
+atividade — não tens acesso a dados financeiros em tempo real, por isso não inventes
+números específicos (quotas de mercado exatas, margens, etc.); foca-te numa avaliação
+qualitativa fundamentada. Devolve exatamente uma entrada por categoria, pela ordem dada.`;
+}
+
+async function fetchMoatAnalysisFromGemini(
+  ticker: string,
+  companyName: string,
+  sector: string | null,
+  industry: string | null,
+): Promise<MoatCategoryResult[]> {
+  const key = geminiKey();
+  const model = "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": key,
+    },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: buildMoatPrompt(companyName, sector, industry) }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: buildMoatSchema(),
+        temperature: 0.4,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Gemini ${res.status} para ${ticker}${body ? `: ${body.slice(0, 200)}` : ""}`);
+  }
+
+  const json = await res.json();
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error(`Gemini não devolveu conteúdo para ${ticker}`);
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`Gemini devolveu JSON inválido para ${ticker}`);
+  }
+
+  const categories = parsed?.categories;
+  if (!Array.isArray(categories) || categories.length === 0) {
+    throw new Error(`Gemini devolveu estrutura inesperada para ${ticker}`);
+  }
+
+  // Defensive validation — coerce/clamp rather than trust the model blindly, and only
+  // keep entries matching one of our 5 known categories (in case of a hallucinated label).
+  const known = new Set<string>(MOAT_CATEGORIES);
+  const results: MoatCategoryResult[] = categories
+    .filter((c: any) => known.has(c?.category))
+    .map((c: any) => ({
+      category: String(c.category),
+      score: Math.max(1, Math.min(10, Math.round(Number(c.score) || 1))),
+      explanation: String(c.explanation ?? "").trim(),
+    }));
+
+  if (results.length === 0) {
+    throw new Error(`Nenhuma categoria válida devolvida pela Gemini para ${ticker}`);
+  }
+
+  return results;
+}
+
+export const getMoatAnalysis = createServerFn({ method: "GET" })
+  .inputValidator((d: { ticker: string; companyName: string; sector?: string | null; industry?: string | null }) =>
+    z
+      .object({
+        ticker: z.string().min(1).max(15),
+        companyName: z.string().min(1),
+        sector: z.string().nullable().optional(),
+        industry: z.string().nullable().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }): Promise<MoatAnalysis> => {
+    const t = data.ticker.toUpperCase();
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: row } = await supabaseAdmin
+      .from("moat_analysis_cache")
+      .select("categories, updated_at")
+      .eq("ticker", t)
+      .maybeSingle();
+
+    const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < MOAT_TTL_MS;
+    if (isFresh) {
+      return { ticker: t, categories: row.categories as MoatCategoryResult[], generatedAt: row.updated_at };
+    }
+
+    try {
+      const categories = await fetchMoatAnalysisFromGemini(
+        t,
+        data.companyName,
+        data.sector ?? null,
+        data.industry ?? null,
+      );
+      const generatedAt = new Date().toISOString();
+      await supabaseAdmin
+        .from("moat_analysis_cache")
+        .upsert({ ticker: t, categories, updated_at: generatedAt }, { onConflict: "ticker" });
+      return { ticker: t, categories, generatedAt };
+    } catch (err) {
+      // Gemini failed (rate-limited, malformed JSON, etc.) — serve stale cache if we have
+      // any, since a 30-day-old qualitative moat read is still far more useful than an error.
+      if (row) {
+        return { ticker: t, categories: row.categories as MoatCategoryResult[], generatedAt: row.updated_at };
+      }
+      throw err;
+    }
   });
