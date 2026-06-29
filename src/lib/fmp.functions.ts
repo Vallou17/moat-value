@@ -584,6 +584,48 @@ async function fetchEdgarLatestInstant(cik: string, tags: string[]): Promise<num
   return null;
 }
 
+// Annual counterpart of fetchEdgarLatestInstant — for balance-sheet "instant" facts
+// (no `start`, just `end`), returns one value per fiscal year: the value as reported at
+// that year's fiscal year-end (the 10-K balance-sheet date), not a mid-year snapshot.
+// Used for historical Total Debt and Shares Outstanding charts, where we want one point
+// per year rather than just the single most-recent value fetchEdgarLatestInstant gives.
+async function fetchEdgarInstantByYear(cik: string, tags: string[]): Promise<Map<number, number>> {
+  const out = new Map<number, { val: number; filed: string }>();
+  for (const tag of tags) {
+    try {
+      const res = await fetch(
+        `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
+        { headers: EDGAR_HEADERS },
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const usd = json?.units?.USD;
+      if (!Array.isArray(usd)) continue;
+      for (const entry of usd) {
+        // Only take the value from 10-K filings, at the fiscal year-end date itself —
+        // a 10-K's balance sheet only has one "instant" date (the FY-end), so filtering
+        // by form=10-K already gives us exactly one candidate value per filing.
+        if (entry.form !== "10-K") continue;
+        const end = String(entry.end ?? "");
+        const year = Number(end.slice(0, 4));
+        if (!year) continue;
+        const val = Number(entry.val);
+        if (!isFinite(val)) continue;
+        const filed = String(entry.filed ?? "");
+        const existing = out.get(year);
+        if (!existing || filed > existing.filed) {
+          out.set(year, { val, filed });
+        }
+      }
+    } catch {
+      // try next tag
+    }
+  }
+  const simple = new Map<number, number>();
+  for (const [year, { val }] of out) simple.set(year, val);
+  return simple;
+}
+
 const LONG_TERM_DEBT_TAGS = ["LongTermDebtNoncurrent", "LongTermDebt"];
 const SHORT_TERM_DEBT_TAGS = [
   "LongTermDebtCurrent",
@@ -595,6 +637,7 @@ const CASH_TAGS = [
   "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
 ];
 const SHARES_OUTSTANDING_TAGS = ["CommonStockSharesOutstanding"];
+const NET_INCOME_TAGS = ["NetIncomeLoss", "ProfitLoss"];
 
 type EdgarBalanceSnapshot = {
   totalDebt: number | null;
@@ -616,15 +659,48 @@ async function fetchEdgarBalanceSnapshot(ticker: string): Promise<EdgarBalanceSn
   return { totalDebt, cash, sharesOutstanding: shares };
 }
 
-type EdgarHistory = { year: number; revenue: number; fcf: number }[];
+type EdgarHistory = {
+  year: number;
+  revenue: number;
+  fcf: number;
+  capex: number | null;
+  totalDebt: number | null;
+  netProfitMargin: number | null;
+  peTTM: number | null;
+}[];
+
+// Average closing price for a calendar year, from a daily candle series (e.g. from
+// getCachedLongHistory). Used for the historical P/E chart's "average price for the year"
+// approach. Returns null if we have no candles at all within that calendar year.
+function averagePriceForYear(candles: Candle[], year: number): number | null {
+  const yearCandles = candles.filter((c) => c.date.slice(0, 4) === String(year));
+  if (yearCandles.length === 0) return null;
+  const sum = yearCandles.reduce((s, c) => s + c.close, 0);
+  return sum / yearCandles.length;
+}
 
 async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | null> {
   const cik = await getCikForTicker(ticker);
   if (!cik) return null;
-  const [revenue, opCf, capex] = await Promise.all([
+  const [revenue, opCf, capex, netIncome, totalDebtByYear, sharesByYear] = await Promise.all([
     fetchEdgarConcept(cik, REVENUE_TAGS),
     fetchEdgarConcept(cik, OPERATING_CF_TAGS),
     fetchEdgarConcept(cik, CAPEX_TAGS),
+    fetchEdgarConcept(cik, NET_INCOME_TAGS),
+    Promise.all([
+      fetchEdgarInstantByYear(cik, LONG_TERM_DEBT_TAGS),
+      fetchEdgarInstantByYear(cik, SHORT_TERM_DEBT_TAGS),
+    ]).then(([lt, st]) => {
+      const years = new Set([...lt.keys(), ...st.keys()]);
+      const out = new Map<number, number>();
+      for (const y of years) {
+        const l = lt.get(y);
+        const s = st.get(y);
+        if (l != null || s != null) out.set(y, (l ?? 0) + (s ?? 0));
+      }
+      return out;
+    }),
+    fetchEdgarInstantByYear(cik, SHARES_OUTSTANDING_TAGS),
   ]);
   if (revenue.size === 0) return null;
   // If we found revenue but no CAPEX at all, none of our known tags matched this filer's
@@ -634,10 +710,38 @@ async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | nu
 
   const years = Array.from(revenue.keys()).sort((a, b) => a - b);
   const last10 = years.slice(-10);
+
+  // P/E needs a daily price series to average per calendar year — only fetched if we're
+  // actually going to compute at least one P/E point, and shared across all years here
+  // rather than refetched per year.
+  const priceHistory = await getCachedLongHistory(ticker).catch(() => null);
+
   return last10.map((year) => {
     const op = opCf.get(year) ?? 0;
-    const cap = Math.abs(capex.get(year) ?? 0);
-    return { year, revenue: revenue.get(year) ?? 0, fcf: op - cap };
+    const capVal = capex.get(year);
+    const cap = Math.abs(capVal ?? 0);
+    const fcf = op - cap;
+
+    const rev = revenue.get(year) ?? 0;
+    const ni = netIncome.get(year);
+    const netProfitMargin = ni != null && rev > 0 ? ni / rev : null;
+
+    const totalDebt = totalDebtByYear.get(year) ?? null;
+
+    const shares = sharesByYear.get(year);
+    const avgPrice = priceHistory ? averagePriceForYear(priceHistory, year) : null;
+    const eps = ni != null && shares != null && shares > 0 ? ni / shares : null;
+    const peTTM = eps != null && eps > 0 && avgPrice != null ? avgPrice / eps : null;
+
+    return {
+      year,
+      revenue: rev,
+      fcf,
+      capex: capVal != null ? Math.abs(capVal) : null,
+      totalDebt,
+      netProfitMargin,
+      peTTM,
+    };
   });
 }
 
@@ -985,8 +1089,18 @@ const rawTotalDebt = balance0.totalDebt;
 // no FMP fallback for the quarterly series the way there is for annual. Companies that don't
 // file 10-Qs with the SEC (non-US filers) will simply get an empty `quarterly` array; the UI
 // should treat that as "quarterly view unavailable for this ticker", not as an error.
+export type AnnualHistoryPoint = {
+  year: number;
+  revenue: number;
+  fcf: number;
+  capex: number | null;
+  totalDebt: number | null;
+  netProfitMargin: number | null;
+  peTTM: number | null;
+};
+
 export type StockHistoryResponse = {
-  annual: { year: number; revenue: number; fcf: number }[];
+  annual: AnnualHistoryPoint[];
   quarterly: QuarterPoint[];
 };
 
@@ -1003,7 +1117,10 @@ export const getStockHistory = createServerFn({ method: "GET" })
     ]);
     const { incomeArr, cashArr } = fundamentals;
 
-    const fmpAnnual = incomeArr
+    // FMP-only fallback (non-US filers, or EDGAR unavailable) — only Revenue/FCF are
+    // available here since the extra metrics (CAPEX, debt-by-year, margin, P/E) rely on
+    // EDGAR's multi-year XBRL history, which FMP's plan can't replicate beyond ~5 years.
+    const fmpAnnual: AnnualHistoryPoint[] = incomeArr
       .slice()
       .reverse()
       .map((inc: any) => {
@@ -1013,6 +1130,11 @@ export const getStockHistory = createServerFn({ method: "GET" })
           year,
           revenue: Number(inc.revenue ?? 0),
           fcf: Number(matchingCash?.freeCashFlow ?? 0),
+          capex: matchingCash?.capitalExpenditure != null ? Math.abs(Number(matchingCash.capitalExpenditure)) : null,
+          totalDebt: null,
+          netProfitMargin:
+            Number(inc.revenue) > 0 && inc.netIncome != null ? Number(inc.netIncome) / Number(inc.revenue) : null,
+          peTTM: null,
         };
       })
       .filter((h) => h.year > 0);
