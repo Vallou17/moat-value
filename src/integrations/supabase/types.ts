@@ -14,24 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
-      moat_cache: {
+      moat_analysis_cache: {
         Row: {
-          analysis_json: Json
-          generated_at: string
+          categories: Json
           id: string
           ticker: string
+          updated_at: string
         }
         Insert: {
-          analysis_json: Json
-          generated_at?: string
+          categories: Json
           id?: string
           ticker: string
+          updated_at?: string
         }
         Update: {
-          analysis_json?: Json
-          generated_at?: string
+          categories?: Json
           id?: string
           ticker?: string
+          updated_at?: string
         }
         Relationships: []
       }
