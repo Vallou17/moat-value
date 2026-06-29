@@ -1080,7 +1080,7 @@ function buildMoatSchema() {
           properties: {
             category: { type: "STRING", enum: MOAT_CATEGORIES as unknown as string[] },
             score: { type: "INTEGER", description: "Nota de 1 (sem moat) a 10 (moat muito forte)." },
-            explanation: { type: "STRING", description: "Explicação breve, 1-2 frases, em português europeu." },
+            explanation: { type: "STRING", description: "Explicação específica e analiticamente rigorosa, 2-3 frases, em português europeu, nível de nota de research profissional." },
           },
           required: ["category", "score", "explanation"],
         },
@@ -1093,21 +1093,42 @@ function buildMoatSchema() {
 function buildMoatPrompt(companyName: string, sector: string | null, industry: string | null): string {
   const sectorLine =
     sector || industry
-      ? `Setor: ${sector ?? "desconhecido"}. Indústria: ${industry ?? "desconhecida"}.`
-      : "Setor e indústria desconhecidos — usa o teu conhecimento sobre a empresa para os inferir.";
-  return `Analisa o "moat" (vantagem competitiva sustentável) da empresa "${companyName}".
+      ? `Classificação de referência (pode estar incompleta ou desatualizada): Setor "${sector ?? "desconhecido"}", Indústria "${industry ?? "desconhecida"}".`
+      : "Não tenho uma classificação de setor/indústria fiável — usa o teu conhecimento sobre a empresa para a situar corretamente.";
+
+  return `Veste o papel de um analista de investimentos sénior, de top-tier (nível de um analista
+de equity research de um fundo de referência como Baillie Gifford, Berkshire Hathaway ou
+similar), a escrever uma nota de research sobre o moat (vantagem competitiva sustentável)
+de "${companyName}".
+
 ${sectorLine}
 
+REGRA CRÍTICA — não simplifiques o negócio: muitas empresas conhecidas evoluíram muito
+além do negócio com que ficaram associadas no imaginário popular. Antes de avaliar,
+pensa explicitamente em TODAS as linhas de negócio materiais da empresa hoje (não só a
+mais famosa ou histórica) e em como cada categoria de moat se aplica ao conjunto. Por
+exemplo, uma análise de e-commerce que ignore cloud computing, publicidade digital,
+ou outras unidades de negócio relevantes seria uma análise fraca e desatualizada — o
+mesmo cuidado aplica-se a qualquer empresa cujo negócio principal tenha mudado ou se
+tenha diversificado ao longo do tempo.
+
 Classifica a empresa nas seguintes 5 categorias, cada uma com uma nota de 1 a 10
-(1 = sem vantagem nesta categoria, 10 = vantagem muito forte e duradoura) e uma
-explicação breve (1-2 frases, em português europeu):
+(1 = sem vantagem nesta categoria, 10 = vantagem muito forte e duradoura):
 
 ${MOAT_CATEGORIES.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
-Baseia a tua análise no teu conhecimento geral sobre esta empresa e o seu setor de
-atividade — não tens acesso a dados financeiros em tempo real, por isso não inventes
-números específicos (quotas de mercado exatas, margens, etc.); foca-te numa avaliação
-qualitativa fundamentada. Devolve exatamente uma entrada por categoria, pela ordem dada.`;
+Para cada categoria, a explicação deve:
+- Ser específica à empresa (não genérica ao setor) — nomeia produtos, segmentos de
+  negócio, ou dinâmicas competitivas concretas sempre que relevante.
+- Ter 2-3 frases, em português europeu, com o rigor analítico de uma nota de research
+  profissional — não um resumo superficial.
+- Quando a empresa tiver múltiplas linhas de negócio com perfis de moat distintos,
+  refletir isso explicitamente em vez de avaliar só o negócio mais conhecido.
+
+Baseia-te no teu conhecimento geral sobre esta empresa — não tens acesso a dados
+financeiros em tempo real, por isso não inventes números específicos (quotas de
+mercado exatas, margens, receitas). Devolve exatamente uma entrada por categoria,
+pela ordem dada.`;
 }
 
 async function fetchMoatAnalysisFromGemini(
