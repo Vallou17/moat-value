@@ -156,9 +156,15 @@ async function getCachedLongHistory(symbol: string): Promise<Candle[] | null> {
     return row ? (row.candles as Candle[]) : null;
   }
 
-  await supabaseAdmin
+  const { error: upsertError } = await supabaseAdmin
     .from("price_history_cache")
     .upsert({ symbol, candles: fresh, updated_at: new Date().toISOString() }, { onConflict: "symbol" });
+  if (upsertError) {
+    // Don't fail the request over a cache-write error — the fresh data we just fetched
+    // is still valid to return. But log it, since a silent write failure here means every
+    // subsequent request re-fetches from Twelve Data instead of hitting cache.
+    console.error(`price_history_cache upsert failed for ${symbol}:`, upsertError);
+  }
 
   return fresh;
 }
@@ -304,12 +310,15 @@ async function getCachedFundamentals(ticker: string): Promise<RawFundamentals> {
 
   try {
     const fresh = await fetchFundamentalsFromFmp(ticker);
-    await supabaseAdmin
+    const { error: upsertError } = await supabaseAdmin
       .from("stock_fundamentals_cache")
       .upsert(
         { ticker, payload: fresh, updated_at: new Date().toISOString() },
         { onConflict: "ticker" },
       );
+    if (upsertError) {
+      console.error(`stock_fundamentals_cache upsert failed for ${ticker}:`, upsertError);
+    }
     return fresh;
   } catch (err) {
     // FMP failed (rate-limited, network issue) — serve stale cache if we have any, since
@@ -728,12 +737,15 @@ async function getCachedEdgarHistory(ticker: string): Promise<CachedEdgarHistory
     ]);
     if (annual && annual.length > 0) {
       const fresh: CachedEdgarHistory = { annual, quarterly: quarterly ?? [] };
-      await supabaseAdmin
+      const { error: upsertError } = await supabaseAdmin
         .from("edgar_history_cache")
         .upsert(
           { ticker, history: fresh, updated_at: new Date().toISOString() },
           { onConflict: "ticker" },
         );
+      if (upsertError) {
+        console.error(`edgar_history_cache upsert failed for ${ticker}:`, upsertError);
+      }
       return fresh;
     }
     // Fresh fetch failed but we have an old-shape or stale row — salvage what we can.
@@ -1230,9 +1242,15 @@ export const getMoatAnalysis = createServerFn({ method: "GET" })
         data.industry ?? null,
       );
       const generatedAt = new Date().toISOString();
-      await supabaseAdmin
+      const { error: upsertError } = await supabaseAdmin
         .from("moat_analysis_cache")
         .upsert({ ticker: t, categories, updated_at: generatedAt }, { onConflict: "ticker" });
+      if (upsertError) {
+        // Don't fail the request over a cache-write error — we still have a fresh analysis
+        // to return. But log it loudly: a silent failure here means we re-call Gemini (and
+        // re-bill the rate limit) on every single visit instead of once per 30 days.
+        console.error(`moat_analysis_cache upsert failed for ${t}:`, upsertError);
+      }
       return { ticker: t, categories, generatedAt };
     } catch (err) {
       // Gemini failed (rate-limited, malformed JSON, etc.) — serve stale cache if we have
