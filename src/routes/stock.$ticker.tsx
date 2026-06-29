@@ -28,8 +28,10 @@ import {
 import {
   getStockData,
   getStockHistory,
+  getMoatAnalysis,
   type StockData,
   type StockHistoryResponse,
+  type MoatCategoryResult,
 } from "@/lib/fmp.functions";
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { computeDcf, discountPremiumPct } from "@/lib/dcf";
@@ -108,6 +110,24 @@ function StockView({
   const { user } = useAuth();
   const [inWatch, setInWatch] = useState(false);
   const [savingWatch, setSavingWatch] = useState(false);
+
+  // Fetched lazily (separate from getStockData) — only needs companyName/sector/industry,
+  // which only exist once `data` has loaded. Cached server-side for 30 days per ticker,
+  // so this is a near-instant cache hit for any ticker someone has already viewed this month.
+  const moatQuery = useQuery({
+    queryKey: ["moat-analysis", data.ticker],
+    queryFn: () =>
+      getMoatAnalysis({
+        data: {
+          ticker: data.ticker,
+          companyName: data.companyName,
+          sector: data.sector,
+          industry: data.industry,
+        },
+      }),
+    staleTime: 24 * 60 * 60_000,
+    retry: 1,
+  });
 
   // Defaults
 const defaults = useMemo(
@@ -407,23 +427,74 @@ const defaults = useMemo(
         </Card>
       </section>
 
-      {/* Moat (placeholder) */}
+      {/* Moat (AI analysis) */}
       <section className="mt-6">
         <Card className="p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
-                <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Análise de
-                Moat (IA)
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Análise de vantagens competitivas gerada por IA — disponível em breve.
-              </p>
+          <h2 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
+            <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Análise de
+            Moat (IA)
+          </h2>
+
+          {moatQuery.isLoading ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-24 animate-pulse rounded-lg bg-muted/40" />
+              ))}
             </div>
-            <Button disabled variant="secondary">Em breve</Button>
-          </div>
+          ) : moatQuery.isError || !moatQuery.data ? (
+            <p className="text-sm text-muted-foreground">
+              Não foi possível gerar a análise de Moat para esta ação. Tenta novamente mais
+              tarde.
+            </p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {moatQuery.data.categories.map((c) => (
+                <MoatCategoryCard key={c.category} result={c} />
+              ))}
+            </div>
+          )}
+          <p className="mt-4 flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
+            <Info className="mt-[1px] h-3 w-3 shrink-0" />
+            <span>
+              Análise gerada por IA com base no conhecimento geral sobre a empresa, sem acesso
+              a dados financeiros em tempo real — serve como ponto de partida, não como
+              recomendação de investimento.
+            </span>
+          </p>
         </Card>
       </section>
+    </div>
+  );
+}
+
+function MoatCategoryCard({ result }: { result: MoatCategoryResult }) {
+  const pct = (result.score / 10) * 100;
+  const color =
+    result.score >= 8
+      ? "#2E8B3D"
+      : result.score >= 6
+        ? "#8FC76B"
+        : result.score >= 4
+          ? "#F2C744"
+          : result.score >= 2
+            ? "#EF9F3C"
+            : "#D9483D";
+
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-xs font-semibold leading-snug">{result.category}</div>
+        <div className="shrink-0 text-sm font-bold" style={{ color }}>
+          {result.score}/10
+        </div>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
+      </div>
+      <p className="mt-2 text-xs leading-snug text-muted-foreground">{result.explanation}</p>
     </div>
   );
 }
