@@ -1059,8 +1059,8 @@ export type MoatAnalysis = {
 };
 
 function geminiKey() {
-  const k = process.env.GEMINI_API_KEY;
-  if (!k) throw new Error("Chave GEMINI_API_KEY não configurada no servidor.");
+  const k = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
+  if (!k) throw new Error("Chave GOOGLE_API_KEY (ou GEMINI_API_KEY) não configurada no servidor.");
   return k;
 }
 
