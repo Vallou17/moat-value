@@ -432,7 +432,7 @@ const defaults = useMemo(
         <Card className="p-4 sm:p-5">
           <h2 className="mb-4 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:gap-2 sm:text-sm">
             <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> MOAT da
-            empresa, gerada por Inteligência Artificial
+            empresa - análise gerada por Inteligência Artificial
           </h2>
 
           {moatQuery.isLoading ? (
