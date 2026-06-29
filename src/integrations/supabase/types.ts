@@ -14,24 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
-      moat_cache: {
+      edgar_history_cache: {
         Row: {
-          analysis_json: Json
-          generated_at: string
-          id: string
+          history: Json
           ticker: string
+          updated_at: string
         }
         Insert: {
-          analysis_json: Json
-          generated_at?: string
-          id?: string
+          history: Json
           ticker: string
+          updated_at?: string
         }
         Update: {
-          analysis_json?: Json
-          generated_at?: string
+          history?: Json
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      moat_analysis_cache: {
+        Row: {
+          categories: Json
+          id: string
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          categories: Json
+          id?: string
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          categories?: Json
           id?: string
           ticker?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -71,6 +89,24 @@ export type Database = {
           email?: string | null
           id?: string
           plan?: string
+        }
+        Relationships: []
+      }
+      stock_fundamentals_cache: {
+        Row: {
+          payload: Json
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          payload: Json
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          payload?: Json
+          ticker?: string
+          updated_at?: string
         }
         Relationships: []
       }
