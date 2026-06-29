@@ -15,10 +15,6 @@ import {
   ChevronDown,
   Receipt,
   Banknote,
-  HardHat,
-  Landmark,
-  Percent,
-  Scale,
 } from "lucide-react";
 import {
   Bar,
@@ -34,7 +30,6 @@ import {
   getStockHistory,
   type StockData,
   type StockHistoryResponse,
-  type AnnualHistoryPoint,
 } from "@/lib/fmp.functions";
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { computeDcf, discountPremiumPct } from "@/lib/dcf";
@@ -408,38 +403,6 @@ const defaults = useMemo(
               dataKey="fcf"
               currency={data.currency}
             />
-            <ChartCard
-              title="CAPEX"
-              icon={HardHat}
-              history={historyQuery.data}
-              isLoading={historyQuery.isLoading}
-              dataKey="capex"
-              currency={data.currency}
-            />
-            <ChartCard
-              title="Dívida Total"
-              icon={Landmark}
-              history={historyQuery.data}
-              isLoading={historyQuery.isLoading}
-              dataKey="totalDebt"
-              currency={data.currency}
-            />
-            <ChartCard
-              title="Margem de Lucro"
-              icon={Percent}
-              history={historyQuery.data}
-              isLoading={historyQuery.isLoading}
-              dataKey="netProfitMargin"
-              currency={data.currency}
-            />
-            <ChartCard
-              title="P/E TTM"
-              icon={Scale}
-              history={historyQuery.data}
-              isLoading={historyQuery.isLoading}
-              dataKey="peTTM"
-              currency={data.currency}
-            />
           </div>
         </Card>
       </section>
@@ -761,19 +724,6 @@ function makeHighlightBar(activeIndex: number | null) {
 
 type Granularity = "annual" | "quarterly";
 
-type ChartMetricKey = "revenue" | "fcf" | "capex" | "totalDebt" | "netProfitMargin" | "peTTM";
-
-// Metrics with quarterly EDGAR coverage (duration facts we reconstruct per-quarter).
-// CAPEX/totalDebt/margin/P&E are annual-only for now (totalDebt and P/E in particular don't
-// have a clean quarterly equivalent worth the complexity), so those charts skip the toggle.
-const QUARTERLY_CAPABLE: ChartMetricKey[] = ["revenue", "fcf"];
-
-function formatMetricValue(key: ChartMetricKey, v: number, currency: string): string {
-  if (key === "netProfitMargin") return fmtPct(v * 100, 1);
-  if (key === "peTTM") return `${v.toFixed(1)}x`;
-  return fmtCompact(v, currency);
-}
-
 function ChartCard({
   title,
   icon: TitleIcon,
@@ -786,15 +736,14 @@ function ChartCard({
   icon: typeof Receipt;
   history: StockHistoryResponse | undefined;
   isLoading?: boolean;
-  dataKey: ChartMetricKey;
+  dataKey: "revenue" | "fcf";
   currency: string;
 }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [granularity, setGranularity] = useState<Granularity>("annual");
-  const seriesName = title;
-  const canToggleQuarterly = QUARTERLY_CAPABLE.includes(dataKey);
+  const seriesName = dataKey === "revenue" ? "Receita" : "FCF";
 
-  const hasQuarterly = canToggleQuarterly && (history?.quarterly?.length ?? 0) > 0;
+  const hasQuarterly = (history?.quarterly?.length ?? 0) > 0;
   // Fall back to annual if quarterly was requested but isn't available for this ticker
   // (e.g. non-US filers that don't report 10-Qs to the SEC) rather than show an empty chart.
   const effectiveGranularity: Granularity = granularity === "quarterly" && hasQuarterly ? "quarterly" : "annual";
@@ -804,21 +753,16 @@ function ChartCard({
     if (effectiveGranularity === "quarterly") {
       return history.quarterly.map((q) => ({
         label: `T${q.quarter} ${String(q.year).slice(2)}`,
-        value: dataKey === "revenue" ? q.revenue : q.fcf,
+        revenue: q.revenue,
+        fcf: q.fcf,
       }));
     }
     return history.annual.map((a) => ({
       label: String(a.year),
-      value: a[dataKey as keyof AnnualHistoryPoint] as number | null,
+      revenue: a.revenue,
+      fcf: a.fcf,
     }));
-  }, [history, effectiveGranularity, dataKey]);
-
-  // Annual-only metrics can have gaps (e.g. a year where EDGAR didn't have a CAPEX tag
-  // match) — filter those out rather than plotting a misleading zero-height bar.
-  const plottableData = useMemo(
-    () => chartData.filter((d) => d.value != null && isFinite(d.value as number)),
-    [chartData],
-  );
+  }, [history, effectiveGranularity]);
 
   return (
     <div>
@@ -827,40 +771,34 @@ function ChartCard({
           <TitleIcon className="h-4 w-4 shrink-0 text-primary" />
           {title}
         </div>
-        {canToggleQuarterly && (
-          <div className="flex gap-1">
-            <Button
-              variant={effectiveGranularity === "annual" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-6 px-2 text-[11px]"
-              onClick={() => setGranularity("annual")}
-            >
-              Anual
-            </Button>
-            <Button
-              variant={effectiveGranularity === "quarterly" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-6 px-2 text-[11px]"
-              disabled={!hasQuarterly}
-              title={hasQuarterly ? undefined : "Dados trimestrais indisponíveis para esta ação"}
-              onClick={() => setGranularity("quarterly")}
-            >
-              Trimestral
-            </Button>
-          </div>
-        )}
+        <div className="flex gap-1">
+          <Button
+            variant={effectiveGranularity === "annual" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => setGranularity("annual")}
+          >
+            Anual
+          </Button>
+          <Button
+            variant={effectiveGranularity === "quarterly" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            disabled={!hasQuarterly}
+            title={hasQuarterly ? undefined : "Dados trimestrais indisponíveis para esta ação"}
+            onClick={() => setGranularity("quarterly")}
+          >
+            Trimestral
+          </Button>
+        </div>
       </div>
       <div className="h-56">
         {isLoading || !history ? (
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
-        ) : plottableData.length === 0 ? (
-          <div className="grid h-full place-items-center text-sm text-muted-foreground">
-            Dados indisponíveis para esta ação
-          </div>
         ) : (
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={plottableData}
+            data={chartData}
             margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
             onMouseMove={(state: any) => {
               if (state?.isTooltipActive && typeof state.activeTooltipIndex === "number") {
@@ -879,7 +817,7 @@ function ChartCard({
             />
             <YAxis
               tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-              tickFormatter={(v) => formatMetricValue(dataKey, Number(v), currency).replace(/[A-Z$€]/g, "")}
+              tickFormatter={(v) => fmtCompact(v, currency).replace(/[A-Z$€]/g, "")}
               tickLine={false}
               width={48}
             />
@@ -894,10 +832,10 @@ function ChartCard({
               }}
               labelStyle={{ color: "var(--popover-foreground)" }}
               itemStyle={{ color: "var(--popover-foreground)" }}
-              formatter={(v: number) => [formatMetricValue(dataKey, v, currency), seriesName]}
+              formatter={(v: number) => [fmtCompact(v, currency), seriesName]}
             />
             <Bar
-              dataKey="value"
+              dataKey={dataKey}
               name={seriesName}
               isAnimationActive={false}
               shape={makeHighlightBar(activeIndex) as any}
