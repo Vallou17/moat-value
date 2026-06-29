@@ -60,7 +60,12 @@ export function Header() {
               <Button asChild variant="ghost" size="sm" className="text-xs sm:size-default sm:text-sm">
                 <Link to="/auth">Entrar</Link>
               </Button>
-            <Button asChild size="sm" className="text-xs sm:size-default sm:text-sm">
+            <Button
+  asChild
+  size="sm"
+  className="text-xs text-white hover:opacity-90 sm:size-default sm:text-sm"
+  style={{ background: "linear-gradient(to bottom right, #B794F4, #4F46E5)" }}
+>
   <Link to="/auth" search={{ mode: "register" }}>
     Registar
   </Link>
