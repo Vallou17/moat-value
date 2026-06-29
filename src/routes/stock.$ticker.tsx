@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowDownRight,
@@ -757,7 +757,7 @@ function fmtRatio(n: number | null): string {
 // Custom bar shape: the bar under the cursor gets brightened instead of the default
 // Recharts grey "cursor" rectangle behind the whole category. Mirrors the hover treatment
 // used on the intrinsic-value Gauge, where the highlight lives on the shape itself.
-function makeHighlightBar(activeIndex: number | null) {
+function makeHighlightBar(activeIndex: number | null, gradientId: string) {
   return function HighlightBar(props: any) {
     const { x, y, width, height, index } = props;
     if (!Number.isFinite(height) || !Number.isFinite(y)) return null;
@@ -777,7 +777,7 @@ function makeHighlightBar(activeIndex: number | null) {
         height={Math.max(absHeight, 1)}
         rx={6}
         ry={6}
-        fill="var(--primary)"
+        fill={`url(#${gradientId})`}
         opacity={isActive ? 1 : 0.75}
         style={{ transition: "opacity 120ms ease" }}
       />
@@ -805,6 +805,8 @@ function ChartCard({
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [granularity, setGranularity] = useState<Granularity>("annual");
   const seriesName = dataKey === "revenue" ? "Receita" : "FCF";
+  const rawId = useId();
+  const gradientId = `bar-gradient-${rawId.replace(/[^a-zA-Z0-9]/g, "")}`;
 
   const hasQuarterly = (history?.quarterly?.length ?? 0) > 0;
   // Fall back to annual if quarterly was requested but isn't available for this ticker
@@ -872,6 +874,12 @@ function ChartCard({
             }}
             onMouseLeave={() => setActiveIndex(null)}
           >
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#B794F4" />
+                <stop offset="100%" stopColor="#4F46E5" />
+              </linearGradient>
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis
               dataKey="label"
@@ -901,7 +909,7 @@ function ChartCard({
               dataKey={dataKey}
               name={seriesName}
               isAnimationActive={false}
-              shape={makeHighlightBar(activeIndex) as any}
+              shape={makeHighlightBar(activeIndex, gradientId) as any}
             />
           </BarChart>
         </ResponsiveContainer>
