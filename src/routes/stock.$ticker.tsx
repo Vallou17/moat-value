@@ -980,7 +980,7 @@ const COMBINED_INDICATOR_LABELS: Record<CombinedIndicator, string> = {
   revenue: "Receita",
   fcf: "Free Cash Flow",
   epsDiluted: "EPS Diluído",
-  peTTM: "P/E",
+  peTTM: "P/E TTM",
 };
 
 // Which calendar quarter (1-4) a given ISO date falls into.
@@ -1051,14 +1051,35 @@ function CombinedChart({
     return map;
   }, [history]);
 
+  // Trailing-twelve-months diluted EPS ending in a given quarter: sums that quarter's EPS
+  // with the 3 preceding quarters. Returns null if any of the 4 quarters is missing data —
+  // a partial sum (e.g. only 2 of 4 quarters) would understate annualized earnings and
+  // produce a misleadingly inflated P/E, so we require the full trailing year.
+  function epsTtmEndingAt(year: number, quarter: number): number | null {
+    let sum = 0;
+    let y = year;
+    let q = quarter;
+    for (let i = 0; i < 4; i++) {
+      const eps = quarterlyByKey.get(`${y}-${q}`)?.epsDiluted;
+      if (eps == null) return null;
+      sum += eps;
+      q -= 1;
+      if (q === 0) {
+        q = 4;
+        y -= 1;
+      }
+    }
+    return sum;
+  }
+
   const indicatorByQuarter = useMemo(() => {
     const out = new Map<string, number | null>();
     for (const { year, quarter, key } of quartersInRange) {
       const q = quarterlyByKey.get(key);
       if (indicator === "peTTM") {
-        const eps = q?.epsDiluted;
+        const epsTtm = epsTtmEndingAt(year, quarter);
         const avgPrice = priceCandles ? averageClosePriceForQuarter(priceCandles, year, quarter) : null;
-        out.set(key, eps != null && eps > 0 && avgPrice != null ? avgPrice / eps : null);
+        out.set(key, epsTtm != null && epsTtm > 0 && avgPrice != null ? avgPrice / epsTtm : null);
       } else if (indicator === "epsDiluted") {
         out.set(key, q?.epsDiluted ?? null);
       } else {
