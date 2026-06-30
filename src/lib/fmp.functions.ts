@@ -374,9 +374,12 @@ const CAPEX_TAGS = [
   "PaymentsToAcquireProductiveAssets", // Amazon (and a few others) use this since FY2016
   "PaymentsForCapitalImprovements",
 ];
+const EPS_DILUTED_TAGS = ["EarningsPerShareDiluted"];
 
-async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<number, number>> {
+async function fetchEdgarConcept(cik: string, tags: string[], unit: string = "USD"): Promise<Map<number, number>> {
   // Returns a map of period-year -> value, using the first tag that has data for each year.
+  // `unit` matches XBRL's units key — most financial facts are "USD", but per-share facts
+  // (like diluted EPS) are reported as "USD-per-shares" instead.
   const out = new Map<number, { val: number; filed: string }>();
   for (const tag of tags) {
     try {
@@ -386,7 +389,7 @@ async function fetchEdgarConcept(cik: string, tags: string[]): Promise<Map<numbe
       );
       if (!res.ok) continue;
       const json = await res.json();
-      const usd = json?.units?.USD;
+      const usd = json?.units?.[unit];
       if (!Array.isArray(usd)) continue;
       for (const entry of usd) {
         // Only full-year 10-K figures (skip quarterly 10-Qs).
@@ -469,12 +472,18 @@ function classifyFact(entry: any): { year: number; kind: AccumPeriod; val: numbe
   return null; // unrecognized duration (stub period, odd fiscal change) — skip rather than guess
 }
 
-export type QuarterPoint = { year: number; quarter: 1 | 2 | 3 | 4; revenue: number; fcf: number };
+export type QuarterPoint = {
+  year: number;
+  quarter: 1 | 2 | 3 | 4;
+  revenue: number;
+  fcf: number;
+  epsDiluted: number | null;
+};
 
 // Builds per-quarter Revenue/OperatingCF/CAPEX maps for one XBRL concept across all its tags,
 // keeping the most-recently-filed value whenever a period is reported more than once
 // (restatements), exactly like the annual fetchEdgarConcept does.
-async function fetchEdgarConceptByPeriod(cik: string, tags: string[]) {
+async function fetchEdgarConceptByPeriod(cik: string, tags: string[], unit: string = "USD") {
   // year -> bucket of accumulated/isolated facts
   const years = new Map<number, YearBuckets>();
   // Track isolated quarters separately with their start date so we can later sort them
@@ -489,7 +498,7 @@ async function fetchEdgarConceptByPeriod(cik: string, tags: string[]) {
       );
       if (!res.ok) continue;
       const json = await res.json();
-      const usd = json?.units?.USD;
+      const usd = json?.units?.[unit];
       if (!Array.isArray(usd)) continue;
 
       for (const entry of usd) {
@@ -629,15 +638,16 @@ async function fetchEdgarBalanceSnapshot(ticker: string): Promise<EdgarBalanceSn
   return { totalDebt, cash, sharesOutstanding: shares };
 }
 
-type EdgarHistory = { year: number; revenue: number; fcf: number }[];
+type EdgarHistory = { year: number; revenue: number; fcf: number; epsDiluted: number | null }[];
 
 async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | null> {
   const cik = await getCikForTicker(ticker);
   if (!cik) return null;
-  const [revenue, opCf, capex] = await Promise.all([
+  const [revenue, opCf, capex, epsDiluted] = await Promise.all([
     fetchEdgarConcept(cik, REVENUE_TAGS),
     fetchEdgarConcept(cik, OPERATING_CF_TAGS),
     fetchEdgarConcept(cik, CAPEX_TAGS),
+    fetchEdgarConcept(cik, EPS_DILUTED_TAGS, "USD-per-shares"),
   ]);
   if (revenue.size === 0) return null;
   // If we found revenue but no CAPEX at all, none of our known tags matched this filer's
@@ -650,7 +660,12 @@ async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | nu
   return last10.map((year) => {
     const op = opCf.get(year) ?? 0;
     const cap = Math.abs(capex.get(year) ?? 0);
-    return { year, revenue: revenue.get(year) ?? 0, fcf: op - cap };
+    return {
+      year,
+      revenue: revenue.get(year) ?? 0,
+      fcf: op - cap,
+      epsDiluted: epsDiluted.get(year) ?? null,
+    };
   });
 }
 
@@ -663,10 +678,11 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
   const cik = await getCikForTicker(ticker);
   if (!cik) return null;
 
-  const [revenueParts, opCfParts, capexParts] = await Promise.all([
+  const [revenueParts, opCfParts, capexParts, epsParts] = await Promise.all([
     fetchEdgarConceptByPeriod(cik, REVENUE_TAGS),
     fetchEdgarConceptByPeriod(cik, OPERATING_CF_TAGS),
     fetchEdgarConceptByPeriod(cik, CAPEX_TAGS),
+    fetchEdgarConceptByPeriod(cik, EPS_DILUTED_TAGS, "USD-per-shares"),
   ]);
 
   const allYears = new Set<number>([
@@ -692,6 +708,17 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
       capexParts.years.get(year) ?? {},
       capexParts.dedupedIsolated.get(year),
     );
+    // EPS isn't a cumulative flow like revenue/cash flow — a company's reported YTD EPS
+    // already accounts for the weighted-average share count over that period, so summing
+    // or subtracting quarters the way we do for revenue would be mathematically wrong.
+    // We only use isolated-quarter EPS facts here (skip H1/9M-derived reconstruction);
+    // many filers do report isolated quarterly EPS directly, but where they don't, that
+    // quarter's EPS is simply left null rather than approximated incorrectly.
+    const epsQ = reconstructQuarters(
+      year,
+      {},
+      epsParts.dedupedIsolated.get(year),
+    );
 
     for (let i = 0; i < 4; i++) {
       const rev = revQ[i];
@@ -701,7 +728,13 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
       // revenue isn't useful even if FCF happened to be derivable.
       if (rev == null) continue;
       const fcf = op != null ? op - Math.abs(cap ?? 0) : 0;
-      out.push({ year, quarter: (i + 1) as 1 | 2 | 3 | 4, revenue: rev, fcf });
+      out.push({
+        year,
+        quarter: (i + 1) as 1 | 2 | 3 | 4,
+        revenue: rev,
+        fcf,
+        epsDiluted: epsQ[i],
+      });
     }
   }
 
@@ -1006,7 +1039,7 @@ const rawTotalDebt = balance0.totalDebt;
 // file 10-Qs with the SEC (non-US filers) will simply get an empty `quarterly` array; the UI
 // should treat that as "quarterly view unavailable for this ticker", not as an error.
 export type StockHistoryResponse = {
-  annual: { year: number; revenue: number; fcf: number }[];
+  annual: { year: number; revenue: number; fcf: number; epsDiluted: number | null }[];
   quarterly: QuarterPoint[];
 };
 
@@ -1033,6 +1066,7 @@ export const getStockHistory = createServerFn({ method: "GET" })
           year,
           revenue: Number(inc.revenue ?? 0),
           fcf: Number(matchingCash?.freeCashFlow ?? 0),
+          epsDiluted: inc.epsdiluted != null ? Number(inc.epsdiluted) : null,
         };
       })
       .filter((h) => h.year > 0);
