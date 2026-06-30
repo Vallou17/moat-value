@@ -1062,23 +1062,80 @@ function CombinedChart({
   // a single missing EPS quarter breaks that sum entirely. Net income, being a cumulative
   // flow like revenue, can be reconstructed from YTD filings the same way revenue is,
   // giving much more complete trailing-twelve-months coverage.
+  // All quarters with data, sorted chronologically — used to search for the nearest quarter
+  // with "implied shares" data when filling P/E TTM gaps (see epsTtmEndingAt below). Built
+  // from the full quarterly history, not just quartersInRange, so we can look slightly
+  // outside the visible 10y price window if needed (e.g. the quarter right before it).
+  const sortedQuarterKeys = useMemo(() => {
+    const keys = Array.from(quarterlyByKey.keys());
+    return keys.sort((a, b) => {
+      const [ay, aq] = a.split("-").map(Number);
+      const [by, bq] = b.split("-").map(Number);
+      return ay !== by ? ay - by : aq - bq;
+    });
+  }, [quarterlyByKey]);
+
+  // "Implied" diluted share count for a quarter: netIncome ÷ that same quarter's reported
+  // EPS. Because both numbers come from the same filing, this is always on the correct,
+  // current share basis — unlike a raw shares-outstanding fact, which can be stale or, more
+  // importantly, can straddle a stock split (Netflix did a 10-for-1 split, for example,
+  // which would otherwise silently inflate P/E by ~10x for periods reported pre-split).
+  const impliedSharesByQuarter = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const [key, q] of quarterlyByKey) {
+      if (q.netIncome != null && q.epsDiluted != null && q.epsDiluted !== 0) {
+        out.set(key, q.netIncome / q.epsDiluted);
+      }
+    }
+    return out;
+  }, [quarterlyByKey]);
+
+  // Nearest quarter (by chronological distance) to `key` that has implied-shares data —
+  // used as the share-count basis when a quarter itself lacks an isolated EPS fact.
+  function nearestImpliedShares(key: string): number | null {
+    const idx = sortedQuarterKeys.indexOf(key);
+    if (idx === -1) return impliedSharesByQuarter.size > 0 ? impliedSharesByQuarter.values().next().value : null;
+    for (let dist = 0; dist < sortedQuarterKeys.length; dist++) {
+      const before = sortedQuarterKeys[idx - dist];
+      const after = sortedQuarterKeys[idx + dist];
+      if (before != null && impliedSharesByQuarter.has(before)) return impliedSharesByQuarter.get(before)!;
+      if (after != null && impliedSharesByQuarter.has(after)) return impliedSharesByQuarter.get(after)!;
+      if (before == null && after == null) break;
+    }
+    return null;
+  }
+
+  // Trailing-twelve-months P/E ending in a given quarter. Two paths, in order of accuracy:
+  //  1. If all 4 trailing quarters have an isolated, company-reported diluted EPS fact,
+  //     sum those directly — each is already correctly split-adjusted by the filer.
+  //  2. Otherwise, sum trailing net income (reconstructed from YTD filings, so it has near-
+  //     complete coverage) and divide by the implied share count from the nearest quarter
+  //     that has one — avoiding both "no data" gaps and stale/pre-split share counts.
   function epsTtmEndingAt(year: number, quarter: number): number | null {
-    let netIncomeSum = 0;
+    const quarterKeys: string[] = [];
     let y = year;
     let q = quarter;
-    let shares: number | null = null;
     for (let i = 0; i < 4; i++) {
-      const point = quarterlyByKey.get(`${y}-${q}`);
-      const ni = point?.netIncome;
-      if (ni == null) return null;
-      netIncomeSum += ni;
-      if (shares == null) shares = point?.sharesOutstanding ?? null;
+      quarterKeys.push(`${y}-${q}`);
       q -= 1;
       if (q === 0) {
         q = 4;
         y -= 1;
       }
     }
+
+    const epsValues = quarterKeys.map((k) => quarterlyByKey.get(k)?.epsDiluted ?? null);
+    if (epsValues.every((v) => v != null)) {
+      return epsValues.reduce((sum: number, v) => sum + (v as number), 0);
+    }
+
+    let netIncomeSum = 0;
+    for (const k of quarterKeys) {
+      const ni = quarterlyByKey.get(k)?.netIncome;
+      if (ni == null) return null;
+      netIncomeSum += ni;
+    }
+    const shares = nearestImpliedShares(quarterKeys[0]);
     if (shares == null || shares <= 0) return null;
     return netIncomeSum / shares;
   }
