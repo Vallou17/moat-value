@@ -1005,6 +1005,9 @@ function CombinedChart({
   isHistoryLoading?: boolean;
 }) {
   const [indicator, setIndicator] = useState<CombinedIndicator>("revenue");
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const rawId = useId();
+  const gradientId = `combined-bar-gradient-${rawId.replace(/[^a-zA-Z0-9]/g, "")}`;
 
   const priceQuery = useQuery<Candle[]>({
     queryKey: ["combined-price-history", ticker],
@@ -1067,6 +1070,46 @@ function CombinedChart({
   );
 
   const priceBase = priceCandles && priceCandles.length > 0 ? priceCandles[0].close : null;
+  const priceLatest = priceCandles && priceCandles.length > 0 ? priceCandles[priceCandles.length - 1].close : null;
+
+  // Average price within the most recent quarter and the same quarter one year earlier —
+  // used for the price's year-over-year ("homólogo") comparison in the summary box, mirroring
+  // how the indicator's YoY comparison works.
+  const priceYoy = useMemo(() => {
+    if (!priceCandles || quartersInRange.length === 0) return null;
+    const latest = quartersInRange[quartersInRange.length - 1];
+    const yearAgo = quartersInRange.find((q) => q.year === latest.year - 1 && q.quarter === latest.quarter);
+    if (!yearAgo) return null;
+    const latestAvg = averageClosePriceForQuarter(priceCandles, latest.year, latest.quarter);
+    const yearAgoAvg = averageClosePriceForQuarter(priceCandles, yearAgo.year, yearAgo.quarter);
+    if (latestAvg == null || yearAgoAvg == null || yearAgoAvg === 0) return null;
+    return ((latestAvg - yearAgoAvg) / Math.abs(yearAgoAvg)) * 100;
+  }, [priceCandles, quartersInRange]);
+
+  // Indicator's year-over-year change: most recent quarter with data vs. the same calendar
+  // quarter one year earlier (e.g. Q3 2025 vs Q3 2024) — comparing like-for-like quarters
+  // rather than consecutive ones, since most fundamentals are seasonal.
+  const indicatorYoy = useMemo(() => {
+    const withData = quartersInRange.filter((q) => indicatorByQuarter.get(q.key) != null);
+    if (withData.length === 0) return null;
+    const latest = withData[withData.length - 1];
+    const latestVal = indicatorByQuarter.get(latest.key);
+    const yearAgoKey = `${latest.year - 1}-${latest.quarter}`;
+    const yearAgoVal = indicatorByQuarter.get(yearAgoKey);
+    if (latestVal == null || yearAgoVal == null || yearAgoVal === 0) return null;
+    return ((latestVal - yearAgoVal) / Math.abs(yearAgoVal)) * 100;
+  }, [quartersInRange, indicatorByQuarter]);
+
+  const priceFullPeriodPct = priceBase != null && priceLatest != null && priceBase !== 0 ? ((priceLatest - priceBase) / priceBase) * 100 : null;
+
+  const indicatorFullPeriodPct = useMemo(() => {
+    const withData = quartersInRange.filter((q) => indicatorByQuarter.get(q.key) != null);
+    if (withData.length < 1) return null;
+    const first = indicatorByQuarter.get(withData[0].key);
+    const last = indicatorByQuarter.get(withData[withData.length - 1].key);
+    if (first == null || last == null || first === 0) return null;
+    return ((last - first) / Math.abs(first)) * 100;
+  }, [quartersInRange, indicatorByQuarter]);
 
   // One row per trading day: price as a continuous absolute line, indicator held at its
   // quarter's value only on the last trading day of that quarter (rendered as bars).
@@ -1126,6 +1169,17 @@ function CombinedChart({
     return fmtCompact(v, currency);
   }
 
+  function PctBadge({ pct }: { pct: number | null }) {
+    if (pct == null) return <span className="text-muted-foreground">—</span>;
+    const up = pct >= 0;
+    return (
+      <span className={up ? "text-success" : "text-destructive"}>
+        {up ? "+" : ""}
+        {pct.toFixed(1)}%
+      </span>
+    );
+  }
+
   return (
     <Card className="p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1148,6 +1202,25 @@ function CombinedChart({
         </div>
       </div>
 
+      {!isLoading && chartData.length > 0 && (
+        <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">Cotação — período / homólogo</span>
+            <span className="font-medium">
+              <PctBadge pct={priceFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
+              <PctBadge pct={priceYoy} />
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-muted-foreground">{COMBINED_INDICATOR_LABELS[indicator]} — período / homólogo</span>
+            <span className="font-medium">
+              <PctBadge pct={indicatorFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
+              <PctBadge pct={indicatorYoy} />
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="h-72 sm:h-96">
         {isLoading ? (
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
@@ -1162,7 +1235,24 @@ function CombinedChart({
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <ComposedChart
+              data={chartData}
+              margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              onMouseMove={(state: any) => {
+                if (state?.isTooltipActive && typeof state.activeTooltipIndex === "number") {
+                  setActiveIndex(state.activeTooltipIndex);
+                } else {
+                  setActiveIndex(null);
+                }
+              }}
+              onMouseLeave={() => setActiveIndex(null)}
+            >
+              <defs>
+                <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#B794F4" />
+                  <stop offset="100%" stopColor="#4F46E5" />
+                </linearGradient>
+              </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis
                 dataKey="date"
@@ -1193,7 +1283,7 @@ function CombinedChart({
                 width={56}
               />
               <Tooltip
-                cursor={{ stroke: "var(--border)" }}
+                cursor={false}
                 contentStyle={{
                   background: "var(--popover)",
                   border: "1px solid var(--border)",
@@ -1220,10 +1310,8 @@ function CombinedChart({
                 yAxisId="indicator"
                 dataKey="indicatorValue"
                 name={COMBINED_INDICATOR_LABELS[indicator]}
-                fill="#4F46E5"
-                opacity={0.7}
-                radius={[3, 3, 0, 0]}
                 isAnimationActive={false}
+                shape={makeHighlightBar(activeIndex, gradientId) as any}
               />
               <Line
                 yAxisId="price"
@@ -1240,10 +1328,11 @@ function CombinedChart({
         )}
       </div>
       <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-        Linha roxa: cotação ({currency}, eixo esquerdo, diária). Barras azuis:{" "}
+        Linha roxa: cotação ({currency}, eixo esquerdo, diária). Barras:{" "}
         {COMBINED_INDICATOR_LABELS[indicator]} ({indicator === "peTTM" ? "x" : currency}, eixo
-        direito, trimestral). Passa o rato sobre o gráfico para ver o valor e a variação %
-        desde o início do período.
+        direito, trimestral). "Homólogo" compara o último trimestre com o mesmo trimestre do
+        ano anterior. Passa o rato sobre o gráfico para ver o valor e a variação % desde o
+        início do período.
       </p>
     </Card>
   );
