@@ -967,7 +967,6 @@ function ChartCard({
   );
 }
 
-type CombinedRange = "5A" | "10A";
 type CombinedIndicator = "revenue" | "fcf" | "epsDiluted" | "peTTM";
 
 const COMBINED_INDICATOR_LABELS: Record<CombinedIndicator, string> = {
@@ -977,14 +976,21 @@ const COMBINED_INDICATOR_LABELS: Record<CombinedIndicator, string> = {
   peTTM: "P/E",
 };
 
-// Average closing price for a calendar year, from a daily candle series — used to derive
-// a historical P/E (avg price / EPS that year) on the client, since we already have both
-// series loaded here and don't need a separate server round-trip for it.
-function averageClosePriceForYear(candles: Candle[], year: number): number | null {
-  const yearCandles = candles.filter((c) => c.date.slice(0, 4) === String(year));
-  if (yearCandles.length === 0) return null;
-  const sum = yearCandles.reduce((s, c) => s + c.close, 0);
-  return sum / yearCandles.length;
+// Which calendar quarter (1-4) a given ISO date falls into.
+function quarterOfDate(dateStr: string): number {
+  const month = Number(dateStr.slice(5, 7));
+  return Math.ceil(month / 3);
+}
+
+// Average closing price within one calendar quarter of one year — used to derive a
+// quarterly P/E (avg price that quarter / EPS that quarter) on the client.
+function averageClosePriceForQuarter(candles: Candle[], year: number, quarter: number): number | null {
+  const inQuarter = candles.filter(
+    (c) => Number(c.date.slice(0, 4)) === year && quarterOfDate(c.date) === quarter,
+  );
+  if (inQuarter.length === 0) return null;
+  const sum = inQuarter.reduce((s, c) => s + c.close, 0);
+  return sum / inQuarter.length;
 }
 
 function CombinedChart({
@@ -998,12 +1004,11 @@ function CombinedChart({
   history: StockHistoryResponse | undefined;
   isHistoryLoading?: boolean;
 }) {
-  const [range, setRange] = useState<CombinedRange>("5A");
   const [indicator, setIndicator] = useState<CombinedIndicator>("revenue");
 
   const priceQuery = useQuery<Candle[]>({
-    queryKey: ["combined-price-history", ticker, range],
-    queryFn: () => getIndexHistory({ data: { symbol: ticker, range } }),
+    queryKey: ["combined-price-history", ticker],
+    queryFn: () => getIndexHistory({ data: { symbol: ticker, range: "10A" } }),
     staleTime: 30 * 60_000,
     gcTime: 60 * 60_000,
   });
@@ -1011,71 +1016,93 @@ function CombinedChart({
   const isLoading = isHistoryLoading || priceQuery.isLoading;
   const priceCandles = priceQuery.data;
 
-  const yearsInRange = useMemo(() => {
+  // "year-quarter" keys (e.g. "2025-3") present in the visible price range, in
+  // chronological order — the quarterly indicator chart only makes sense for periods we
+  // also have price data for.
+  const quartersInRange = useMemo(() => {
     if (!priceCandles || priceCandles.length === 0) return [];
-    const years = new Set(priceCandles.map((c) => Number(c.date.slice(0, 4))));
-    return Array.from(years).sort((a, b) => a - b);
-  }, [priceCandles]);
-
-  const annualByYear = useMemo(() => {
-    const map = new Map<number, { revenue: number; fcf: number; epsDiluted: number | null }>();
-    for (const a of history?.annual ?? []) map.set(a.year, a);
-    return map;
-  }, [history]);
-
-  const indicatorByYear = useMemo(() => {
-    const out = new Map<number, number | null>();
-    for (const year of yearsInRange) {
-      const annual = annualByYear.get(year);
-      if (indicator === "peTTM") {
-        const eps = annual?.epsDiluted;
-        const avgPrice = priceCandles ? averageClosePriceForYear(priceCandles, year) : null;
-        out.set(year, eps != null && eps > 0 && avgPrice != null ? avgPrice / eps : null);
-      } else if (indicator === "epsDiluted") {
-        out.set(year, annual?.epsDiluted ?? null);
-      } else {
-        out.set(year, annual ? annual[indicator] : null);
+    const seen = new Set<string>();
+    const out: { year: number; quarter: number; key: string }[] = [];
+    for (const c of priceCandles) {
+      const year = Number(c.date.slice(0, 4));
+      const quarter = quarterOfDate(c.date);
+      const key = `${year}-${quarter}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ year, quarter, key });
       }
     }
     return out;
-  }, [yearsInRange, annualByYear, indicator, priceCandles]);
+  }, [priceCandles]);
 
-  // How many years in the visible range actually have a value for this indicator —
+  const quarterlyByKey = useMemo(() => {
+    const map = new Map<string, { revenue: number; fcf: number; epsDiluted: number | null }>();
+    for (const q of history?.quarterly ?? []) map.set(`${q.year}-${q.quarter}`, q);
+    return map;
+  }, [history]);
+
+  const indicatorByQuarter = useMemo(() => {
+    const out = new Map<string, number | null>();
+    for (const { year, quarter, key } of quartersInRange) {
+      const q = quarterlyByKey.get(key);
+      if (indicator === "peTTM") {
+        const eps = q?.epsDiluted;
+        const avgPrice = priceCandles ? averageClosePriceForQuarter(priceCandles, year, quarter) : null;
+        out.set(key, eps != null && eps > 0 && avgPrice != null ? avgPrice / eps : null);
+      } else if (indicator === "epsDiluted") {
+        out.set(key, q?.epsDiluted ?? null);
+      } else {
+        out.set(key, q ? q[indicator] : null);
+      }
+    }
+    return out;
+  }, [quartersInRange, quarterlyByKey, indicator, priceCandles]);
+
+  // How many quarters in the visible range actually have a value for this indicator —
   // shown to the user when it's 0, so "no data" is distinguishable from "still loading"
   // or a silent bug, instead of just rendering an empty chart with no explanation.
-  const yearsWithData = useMemo(
-    () => Array.from(indicatorByYear.values()).filter((v) => v != null).length,
-    [indicatorByYear],
+  const quartersWithData = useMemo(
+    () => Array.from(indicatorByQuarter.values()).filter((v) => v != null).length,
+    [indicatorByQuarter],
   );
 
   const priceBase = priceCandles && priceCandles.length > 0 ? priceCandles[0].close : null;
 
-  // One row per trading day: price as a continuous absolute line, indicator held constant
-  // across each year (step line) since it only has one value per year.
+  // One row per trading day: price as a continuous absolute line, indicator held at its
+  // quarter's value only on the last trading day of that quarter (rendered as bars).
   const chartData = useMemo(() => {
     if (!priceCandles || priceCandles.length === 0) return [];
+    const lastDayOfQuarter = new Map<string, string>();
+    for (const c of priceCandles) {
+      const key = `${c.date.slice(0, 4)}-${quarterOfDate(c.date)}`;
+      lastDayOfQuarter.set(key, c.date); // candles are chronological, so this ends up as the last one
+    }
     return priceCandles.map((c) => {
-      const y = Number(c.date.slice(0, 4));
+      const key = `${c.date.slice(0, 4)}-${quarterOfDate(c.date)}`;
+      const isQuarterEnd = lastDayOfQuarter.get(key) === c.date;
       return {
         date: c.date,
         price: c.close,
-        pricePctFromStart: priceBase ? ((c.close - priceBase) / priceBase) * 100 : null,
-        indicatorValue: indicatorByYear.get(y) ?? null,
+        indicatorValue: isQuarterEnd ? indicatorByQuarter.get(key) ?? null : null,
+        quarterKey: key,
       };
     });
-  }, [priceCandles, priceBase, indicatorByYear]);
+  }, [priceCandles, indicatorByQuarter]);
 
-  // % change of the indicator from the first year with data to each subsequent year —
+  // % change of the indicator from the first quarter with data to each subsequent quarter —
   // shown in the tooltip alongside the absolute value.
   const indicatorPctFromStart = useMemo(() => {
-    const out = new Map<number, number | null>();
-    const firstValue = yearsInRange.map((y) => indicatorByYear.get(y)).find((v) => v != null);
-    for (const year of yearsInRange) {
-      const v = indicatorByYear.get(year);
-      out.set(year, v != null && firstValue != null && firstValue !== 0 ? ((v - firstValue) / Math.abs(firstValue)) * 100 : null);
+    const out = new Map<string, number | null>();
+    const firstValue = quartersInRange.map((q) => indicatorByQuarter.get(q.key)).find((v) => v != null);
+    for (const { key } of quartersInRange) {
+      const v = indicatorByQuarter.get(key);
+      out.set(
+        key,
+        v != null && firstValue != null && firstValue !== 0 ? ((v - firstValue) / Math.abs(firstValue)) * 100 : null,
+      );
     }
     return out;
-  }, [yearsInRange, indicatorByYear]);
+  }, [quartersInRange, indicatorByQuarter]);
 
   // One tick per calendar year, instead of letting Recharts auto-space ticks by pixel
   // density (which was placing 2+ ticks inside the same year and repeating year labels).
@@ -1106,52 +1133,20 @@ function CombinedChart({
           <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Cotação vs
           Fundamentais
         </h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1">
-            {(["revenue", "fcf", "epsDiluted", "peTTM"] as CombinedIndicator[]).map((opt) => (
-              <Button
-                key={opt}
-                variant={indicator === opt ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setIndicator(opt)}
-              >
-                {COMBINED_INDICATOR_LABELS[opt]}
-              </Button>
-            ))}
-          </div>
-          <div className="flex gap-1">
-            {(["5A", "10A"] as CombinedRange[]).map((r) => (
-              <Button
-                key={r}
-                variant={range === r ? "secondary" : "ghost"}
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setRange(r)}
-              >
-                {r}
-              </Button>
-            ))}
-          </div>
+        <div className="flex flex-wrap gap-1">
+          {(["revenue", "fcf", "epsDiluted", "peTTM"] as CombinedIndicator[]).map((opt) => (
+            <Button
+              key={opt}
+              variant={indicator === opt ? "secondary" : "ghost"}
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setIndicator(opt)}
+            >
+              {COMBINED_INDICATOR_LABELS[opt]}
+            </Button>
+          ))}
         </div>
       </div>
-
-      {/* TEMPORARY DIAGNOSTIC — remove once EPS sourcing is confirmed working correctly. */}
-      {history?.debugEps && (
-        <div className="mb-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[11px] font-mono">
-          <div>
-            [DEBUG] fonte usada: {history.debugEps.usedSource} | EDGAR anos: {history.debugEps.edgarAnnualLength} (
-            {history.debugEps.edgarYearsWithEps} c/ EPS) | FMP anos: {history.debugEps.fmpAnnualLength} (
-            {history.debugEps.fmpYearsWithEps} c/ EPS)
-          </div>
-          <div className="mt-1">
-            EDGAR EPS bruto: {JSON.stringify(history.debugEps.rawEdgarEps)}
-          </div>
-          <div className="mt-1">
-            FMP EPS bruto: {JSON.stringify(history.debugEps.rawFmpEps)}
-          </div>
-        </div>
-      )}
 
       <div className="h-72 sm:h-96">
         {isLoading ? (
@@ -1160,10 +1155,10 @@ function CombinedChart({
           <div className="grid h-full place-items-center text-sm text-muted-foreground">
             Dados de cotação indisponíveis para esta ação
           </div>
-        ) : yearsWithData === 0 ? (
+        ) : quartersWithData === 0 ? (
           <div className="grid h-full place-items-center px-4 text-center text-sm text-muted-foreground">
-            Não há dados de "{COMBINED_INDICATOR_LABELS[indicator]}" disponíveis para esta ação
-            no período selecionado.
+            Não há dados trimestrais de "{COMBINED_INDICATOR_LABELS[indicator]}" disponíveis
+            para esta ação.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -1215,21 +1210,19 @@ function CombinedChart({
                     const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
                     return [`${fmtMoney(value, currency)}${pctStr}`, name];
                   }
-                  const year = Number(String(item?.payload?.date ?? "").slice(0, 4));
-                  const pct = indicatorPctFromStart.get(year);
+                  const key = String(item?.payload?.quarterKey ?? "");
+                  const pct = indicatorPctFromStart.get(key);
                   const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
                   return [`${formatIndicatorValue(value)}${pctStr}`, COMBINED_INDICATOR_LABELS[indicator]];
                 }}
               />
-              <Line
+              <Bar
                 yAxisId="indicator"
-                type="stepAfter"
                 dataKey="indicatorValue"
                 name={COMBINED_INDICATOR_LABELS[indicator]}
-                stroke="#4F46E5"
-                strokeWidth={2}
-                dot={false}
-                connectNulls
+                fill="#4F46E5"
+                opacity={0.7}
+                radius={[3, 3, 0, 0]}
                 isAnimationActive={false}
               />
               <Line
@@ -1247,10 +1240,10 @@ function CombinedChart({
         )}
       </div>
       <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-        Linha roxa: cotação ({currency}, eixo esquerdo). Linha azul:{" "}
+        Linha roxa: cotação ({currency}, eixo esquerdo, diária). Barras azuis:{" "}
         {COMBINED_INDICATOR_LABELS[indicator]} ({indicator === "peTTM" ? "x" : currency}, eixo
-        direito). Passa o rato sobre o gráfico para ver o valor e a variação % desde o início
-        do período.
+        direito, trimestral). Passa o rato sobre o gráfico para ver o valor e a variação %
+        desde o início do período.
       </p>
     </Card>
   );
