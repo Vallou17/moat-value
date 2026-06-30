@@ -764,8 +764,17 @@ async function getCachedEdgarHistory(ticker: string): Promise<CachedEdgarHistory
   const isNewShape =
     cached && typeof cached === "object" && !Array.isArray(cached) && "annual" in cached;
 
+  // Older cache rows (pre-EPS feature) have an `annual` array but every entry is missing
+  // `epsDiluted` — without this check, a 30-day-old row would keep being served as "fresh"
+  // and we'd never re-fetch to backfill EPS, since the TTL alone has no way to know the
+  // schema gained a new field after the row was written.
+  const hasEpsField =
+    isNewShape &&
+    (cached as CachedEdgarHistory).annual.length > 0 &&
+    (cached as CachedEdgarHistory).annual.some((a) => "epsDiluted" in a);
+
   const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < EDGAR_TTL_MS;
-  if (isFresh && isNewShape) return cached as CachedEdgarHistory;
+  if (isFresh && isNewShape && hasEpsField) return cached as CachedEdgarHistory;
 
   try {
     const [annual, quarterly] = await Promise.all([
