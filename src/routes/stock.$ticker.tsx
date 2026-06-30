@@ -1057,20 +1057,15 @@ function CombinedChart({
   const priceCandles = priceQuery.data;
   const priceBase = priceCandles && priceCandles.length > 0 ? priceCandles[0].close : null;
 
-  // One row per trading day, with the price as a continuous % line and the indicator
-  // attached only on the last trading day of each year (so it renders as one bar per
-  // year rather than a bar repeated on every single day).
+  // One row per trading day. The price is naturally continuous (daily candles). The
+  // indicator only has one value per year, so we hold it constant across every day of
+  // that year (a "step" line) — this is what makes it render as a continuous, visible
+  // line instead of a single isolated point per year that Recharts may not connect.
   const chartData = useMemo(() => {
     if (!priceCandles || priceCandles.length === 0 || !priceBase) return [];
-    const lastDayOfYear = new Map<number, string>();
-    for (const c of priceCandles) {
-      const y = Number(c.date.slice(0, 4));
-      lastDayOfYear.set(y, c.date); // candles are chronological, so this ends up as the last one
-    }
     return priceCandles.map((c) => {
       const y = Number(c.date.slice(0, 4));
-      const isYearEnd = lastDayOfYear.get(y) === c.date;
-      const indicatorRaw = isYearEnd ? indicatorByYear.get(y) ?? null : null;
+      const indicatorRaw = indicatorByYear.get(y) ?? null;
       const indicatorPlotValue =
         indicatorRaw == null
           ? null
@@ -1085,6 +1080,23 @@ function CombinedChart({
       };
     });
   }, [priceCandles, priceBase, indicatorByYear, canShowIndicatorAsPct, indicatorBaseValue]);
+
+  // One tick per calendar year (first trading day we have for that year) — instead of
+  // letting Recharts auto-space ticks by pixel density, which can place 2+ ticks inside
+  // the same year and make the axis show repeated year labels.
+  const xTicks = useMemo(() => {
+    if (!priceCandles || priceCandles.length === 0) return [];
+    const seen = new Set<string>();
+    const ticks: string[] = [];
+    for (const c of priceCandles) {
+      const y = c.date.slice(0, 4);
+      if (!seen.has(y)) {
+        seen.add(y);
+        ticks.push(c.date);
+      }
+    }
+    return ticks;
+  }, [priceCandles]);
 
   return (
     <Card className="p-4 sm:p-5">
@@ -1138,8 +1150,9 @@ function CombinedChart({
                 dataKey="date"
                 tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                 tickFormatter={(d) => String(d).slice(0, 4)}
+                ticks={xTicks}
                 tickLine={false}
-                minTickGap={40}
+                minTickGap={20}
               />
               <YAxis
                 yAxisId="price"
@@ -1181,13 +1194,15 @@ function CombinedChart({
                   return [fmtCompact(Number(value), currency), COMBINED_INDICATOR_LABELS[indicator]];
                 }}
               />
-              <Bar
+              <Line
                 yAxisId="indicator"
+                type="stepAfter"
                 dataKey="indicatorValue"
                 name={COMBINED_INDICATOR_LABELS[indicator]}
-                fill="#4F46E5"
-                opacity={0.55}
-                radius={[4, 4, 0, 0]}
+                stroke="#4F46E5"
+                strokeWidth={2}
+                dot={false}
+                connectNulls
                 isAnimationActive={false}
               />
               <Line
