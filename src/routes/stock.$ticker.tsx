@@ -1246,6 +1246,27 @@ function CombinedChart({
         </div>
       </div>
 
+      {/* TEMPORARY DIAGNOSTIC — remove once P/E TTM sourcing is confirmed working correctly. */}
+      {history?.quarterly && (
+        <div className="mb-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[11px] font-mono">
+          <div>
+            [DEBUG] trimestres totais: {history.quarterly.length} | c/ netIncome:{" "}
+            {history.quarterly.filter((q) => q.netIncome != null).length} | c/ sharesOutstanding:{" "}
+            {history.quarterly.filter((q) => q.sharesOutstanding != null).length} | c/ epsDiluted:{" "}
+            {history.quarterly.filter((q) => q.epsDiluted != null).length}
+          </div>
+          <div className="mt-1">
+            últimos 8: {JSON.stringify(history.quarterly.slice(-8).map((q) => ({
+              y: q.year,
+              q: q.quarter,
+              ni: q.netIncome,
+              sh: q.sharesOutstanding,
+              eps: q.epsDiluted,
+            })))}
+          </div>
+        </div>
+      )}
+
       {!isLoading && chartData.length > 0 && (
         <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
           <div className="flex items-center gap-2">
