@@ -1136,6 +1136,23 @@ function CombinedChart({
         </div>
       </div>
 
+      {/* TEMPORARY DIAGNOSTIC — remove once EPS sourcing is confirmed working correctly. */}
+      {history?.debugEps && (
+        <div className="mb-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[11px] font-mono">
+          <div>
+            [DEBUG] fonte usada: {history.debugEps.usedSource} | EDGAR anos: {history.debugEps.edgarAnnualLength} (
+            {history.debugEps.edgarYearsWithEps} c/ EPS) | FMP anos: {history.debugEps.fmpAnnualLength} (
+            {history.debugEps.fmpYearsWithEps} c/ EPS)
+          </div>
+          <div className="mt-1">
+            EDGAR EPS bruto: {JSON.stringify(history.debugEps.rawEdgarEps)}
+          </div>
+          <div className="mt-1">
+            FMP EPS bruto: {JSON.stringify(history.debugEps.rawFmpEps)}
+          </div>
+        </div>
+      )}
+
       <div className="h-72 sm:h-96">
         {isLoading ? (
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
