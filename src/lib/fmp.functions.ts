@@ -379,11 +379,22 @@ const EPS_DILUTED_TAGS = [
   "EarningsPerShareDilutedAndBasic", // some smaller/simpler filers report only one combined tag
   "IncomeLossFromContinuingOperationsPerDilutedShare",
 ];
+// SEC's own docs say per-share units use the key "USD-per-shares", but in practice this
+// varies by filer — confirmed via diagnostic logging that Amazon (and likely others) use
+// "USD/shares" instead. We try every known variant in order rather than assume one fixed key.
+const EPS_UNIT_CANDIDATES = ["USD/shares", "USD-per-shares", "USD-per-share"];
 
-async function fetchEdgarConcept(cik: string, tags: string[], unit: string = "USD"): Promise<Map<number, number>> {
+async function fetchEdgarConcept(
+  cik: string,
+  tags: string[],
+  units: string | string[] = "USD",
+): Promise<Map<number, number>> {
   // Returns a map of period-year -> value, using the first tag that has data for each year.
-  // `unit` matches XBRL's units key — most financial facts are "USD", but per-share facts
-  // (like diluted EPS) are reported as "USD-per-shares" instead.
+  // `units` matches XBRL's units key — most financial facts are "USD", but per-share facts
+  // (like diluted EPS) vary by filer in practice: the SEC's docs say "USD-per-shares", but
+  // some companies (e.g. Amazon) actually use "USD/shares" instead. We try every candidate
+  // key in order and use the first one that has data, rather than assuming a single fixed key.
+  const unitCandidates = Array.isArray(units) ? units : [units];
   const out = new Map<number, { val: number; filed: string }>();
   for (const tag of tags) {
     try {
@@ -391,15 +402,9 @@ async function fetchEdgarConcept(cik: string, tags: string[], unit: string = "US
         `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
         { headers: EDGAR_HEADERS },
       );
-      if (!res.ok) {
-        if (unit !== "USD") console.error(`[EDGAR-DEBUG] ${tag} (${unit}) for CIK${cik}: HTTP ${res.status}`);
-        continue;
-      }
+      if (!res.ok) continue;
       const json = await res.json();
-      if (unit !== "USD") {
-        console.error(`[EDGAR-DEBUG] ${tag} (${unit}) for CIK${cik}: units keys = ${Object.keys(json?.units ?? {}).join(",")}`);
-      }
-      const usd = json?.units?.[unit];
+      const usd = unitCandidates.map((u) => json?.units?.[u]).find((arr) => Array.isArray(arr));
       if (!Array.isArray(usd)) continue;
       for (const entry of usd) {
         // Only full-year 10-K figures (skip quarterly 10-Qs).
@@ -419,8 +424,8 @@ async function fetchEdgarConcept(cik: string, tags: string[], unit: string = "US
           out.set(year, { val: Number(entry.val), filed });
         }
       }
-    } catch (err) {
-      if (unit !== "USD") console.error(`[EDGAR-DEBUG] ${tag} (${unit}) for CIK${cik}: threw`, err);
+    } catch {
+      // try next tag
     }
   }
   const simple = new Map<number, number>();
@@ -493,8 +498,9 @@ export type QuarterPoint = {
 // Builds per-quarter Revenue/OperatingCF/CAPEX maps for one XBRL concept across all its tags,
 // keeping the most-recently-filed value whenever a period is reported more than once
 // (restatements), exactly like the annual fetchEdgarConcept does.
-async function fetchEdgarConceptByPeriod(cik: string, tags: string[], unit: string = "USD") {
+async function fetchEdgarConceptByPeriod(cik: string, tags: string[], units: string | string[] = "USD") {
   // year -> bucket of accumulated/isolated facts
+  const unitCandidates = Array.isArray(units) ? units : [units];
   const years = new Map<number, YearBuckets>();
   // Track isolated quarters separately with their start date so we can later sort them
   // chronologically within a fiscal year (quarter 1..4) without relying on `fp`.
@@ -508,7 +514,7 @@ async function fetchEdgarConceptByPeriod(cik: string, tags: string[], unit: stri
       );
       if (!res.ok) continue;
       const json = await res.json();
-      const usd = json?.units?.[unit];
+      const usd = unitCandidates.map((u) => json?.units?.[u]).find((arr) => Array.isArray(arr));
       if (!Array.isArray(usd)) continue;
 
       for (const entry of usd) {
@@ -657,7 +663,7 @@ async function fetchEdgarHistoryFresh(ticker: string): Promise<EdgarHistory | nu
     fetchEdgarConcept(cik, REVENUE_TAGS),
     fetchEdgarConcept(cik, OPERATING_CF_TAGS),
     fetchEdgarConcept(cik, CAPEX_TAGS),
-    fetchEdgarConcept(cik, EPS_DILUTED_TAGS, "USD-per-shares"),
+    fetchEdgarConcept(cik, EPS_DILUTED_TAGS, EPS_UNIT_CANDIDATES),
   ]);
   if (revenue.size === 0) return null;
   // If we found revenue but no CAPEX at all, none of our known tags matched this filer's
@@ -692,7 +698,7 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
     fetchEdgarConceptByPeriod(cik, REVENUE_TAGS),
     fetchEdgarConceptByPeriod(cik, OPERATING_CF_TAGS),
     fetchEdgarConceptByPeriod(cik, CAPEX_TAGS),
-    fetchEdgarConceptByPeriod(cik, EPS_DILUTED_TAGS, "USD-per-shares"),
+    fetchEdgarConceptByPeriod(cik, EPS_DILUTED_TAGS, EPS_UNIT_CANDIDATES),
   ]);
 
   const allYears = new Set<number>([
