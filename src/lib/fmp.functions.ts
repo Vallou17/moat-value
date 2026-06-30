@@ -797,20 +797,24 @@ async function getCachedEdgarHistory(ticker: string): Promise<CachedEdgarHistory
   const isNewShape =
     cached && typeof cached === "object" && !Array.isArray(cached) && "annual" in cached;
 
-  // Older cache rows (pre-EPS feature, or written while EPS sourcing was still broken)
-  // have an `annual` array where `epsDiluted` is always null — without this check, such a
-  // row would keep being served as "fresh" forever and we'd never re-fetch to backfill EPS,
-  // since the TTL alone can't distinguish "we tried and there's genuinely no data" from
-  // "this row predates EPS sourcing entirely". We treat "every year null" as a cache miss
-  // so a fix to the sourcing logic actually gets a chance to run again instead of being
-  // masked by a stale row that already has the key present (just empty).
+  // Older cache rows (pre-EPS feature, or written before the quarterly netIncome/
+  // sharesOutstanding fields existed) have an `annual`/`quarterly` shape but are missing
+  // data the current sourcing logic relies on — without this check, such a row would keep
+  // being served as "fresh" forever and we'd never re-fetch to backfill it, since the TTL
+  // alone can't distinguish "we tried and there's genuinely no data" from "this row predates
+  // the field entirely". We treat missing data as a cache miss so a fix to the sourcing
+  // logic actually gets a chance to run again instead of being masked by a stale row.
   const hasEpsData =
     isNewShape &&
     (cached as CachedEdgarHistory).annual.length > 0 &&
     (cached as CachedEdgarHistory).annual.some((a) => a.epsDiluted != null);
+  const hasQuarterlyNetIncome =
+    isNewShape &&
+    (cached as CachedEdgarHistory).quarterly.length > 0 &&
+    (cached as CachedEdgarHistory).quarterly.some((q) => q.netIncome != null && q.sharesOutstanding != null);
 
   const isFresh = row && Date.now() - new Date(row.updated_at).getTime() < EDGAR_TTL_MS;
-  if (isFresh && isNewShape && hasEpsData) return cached as CachedEdgarHistory;
+  if (isFresh && isNewShape && hasEpsData && hasQuarterlyNetIncome) return cached as CachedEdgarHistory;
 
   try {
     const [annual, quarterly] = await Promise.all([
