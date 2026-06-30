@@ -600,7 +600,7 @@ function reconstructQuarters(
 
 // Balance sheet items (debt, cash) are point-in-time "instant" facts, not period totals.
 // We want the single most recent reported value, from any filing (10-K or 10-Q).
-async function fetchEdgarLatestInstant(cik: string, tags: string[]): Promise<number | null> {
+async function fetchEdgarLatestInstant(cik: string, tags: string[], unit: string = "USD"): Promise<number | null> {
   for (const tag of tags) {
     try {
       const res = await fetch(
@@ -609,7 +609,7 @@ async function fetchEdgarLatestInstant(cik: string, tags: string[]): Promise<num
       );
       if (!res.ok) continue;
       const json = await res.json();
-      const usd = json?.units?.USD;
+      const usd = json?.units?.[unit];
       if (!Array.isArray(usd) || usd.length === 0) continue;
       const sorted = usd.slice().sort((a: any, b: any) => String(b.end).localeCompare(String(a.end)));
       const latest = sorted[0];
@@ -635,7 +635,7 @@ const CASH_TAGS = [
   "CashAndCashEquivalentsAtCarryingValue",
   "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
 ];
-const SHARES_OUTSTANDING_TAGS = ["CommonStockSharesOutstanding"];
+const SHARES_OUTSTANDING_TAGS = ["CommonStockSharesOutstanding", "CommonStockSharesIssued"];
 
 type EdgarBalanceSnapshot = {
   totalDebt: number | null;
@@ -650,7 +650,7 @@ async function fetchEdgarBalanceSnapshot(ticker: string): Promise<EdgarBalanceSn
     fetchEdgarLatestInstant(cik, LONG_TERM_DEBT_TAGS),
     fetchEdgarLatestInstant(cik, SHORT_TERM_DEBT_TAGS),
     fetchEdgarLatestInstant(cik, CASH_TAGS),
-    fetchEdgarLatestInstant(cik, SHARES_OUTSTANDING_TAGS),
+    fetchEdgarLatestInstant(cik, SHARES_OUTSTANDING_TAGS, "shares"),
   ]);
   const totalDebt =
     longTermDebt != null || shortTermDebt != null ? (longTermDebt ?? 0) + (shortTermDebt ?? 0) : null;
@@ -707,7 +707,7 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
     // needs — using the single most recent reported count for every historical quarter
     // is a reasonable simplification, and far simpler than tracking it as an instant fact
     // per quarter (which XBRL doesn't really support cleanly anyway).
-    fetchEdgarLatestInstant(cik, SHARES_OUTSTANDING_TAGS),
+    fetchEdgarLatestInstant(cik, SHARES_OUTSTANDING_TAGS, "shares"),
   ]);
 
   const allYears = new Set<number>([
