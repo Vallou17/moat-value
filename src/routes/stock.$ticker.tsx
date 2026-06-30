@@ -1081,11 +1081,26 @@ function CombinedChart({
   // importantly, can straddle a stock split (Netflix did a 10-for-1 split, for example,
   // which would otherwise silently inflate P/E by ~10x for periods reported pre-split).
   const impliedSharesByQuarter = useMemo(() => {
-    const out = new Map<string, number>();
+    const raw = new Map<string, number>();
     for (const [key, q] of quarterlyByKey) {
       if (q.netIncome != null && q.epsDiluted != null && q.epsDiluted !== 0) {
-        out.set(key, q.netIncome / q.epsDiluted);
+        const implied = q.netIncome / q.epsDiluted;
+        if (implied > 0) raw.set(key, implied);
       }
+    }
+    // A stock split changes EPS and share count but NOT net income — if a filer's EDGAR
+    // history has even one quarter where the isolated EPS fact wasn't restated for a later
+    // split (this happens in practice; confirmed for Netflix's 10-for-1 split), that single
+    // quarter's implied share count comes out ~10x off from every other quarter's, which
+    // would otherwise corrupt the "nearest available" lookup used for filling P/E gaps.
+    // We filter those out via a simple median-based outlier check rather than trying to
+    // detect the exact split date and ratio, which EDGAR doesn't cleanly expose.
+    const values = Array.from(raw.values()).sort((a, b) => a - b);
+    if (values.length < 3) return raw;
+    const median = values[Math.floor(values.length / 2)];
+    const out = new Map<string, number>();
+    for (const [key, val] of raw) {
+      if (val > median / 3 && val < median * 3) out.set(key, val);
     }
     return out;
   }, [quarterlyByKey]);
@@ -1125,7 +1140,11 @@ function CombinedChart({
     }
 
     const epsValues = quarterKeys.map((k) => quarterlyByKey.get(k)?.epsDiluted ?? null);
-    if (epsValues.every((v) => v != null)) {
+    // Only trust a direct sum of the 4 isolated EPS facts if none of those quarters was
+    // flagged as a split-inconsistent outlier above — otherwise a pre-split EPS fact could
+    // silently corrupt the sum even though all 4 values are individually non-null.
+    const allEpsConsistent = quarterKeys.every((k) => impliedSharesByQuarter.has(k));
+    if (epsValues.every((v) => v != null) && allEpsConsistent) {
       return epsValues.reduce((sum: number, v) => sum + (v as number), 0);
     }
 
