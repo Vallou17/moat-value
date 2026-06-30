@@ -1054,6 +1054,16 @@ const rawTotalDebt = balance0.totalDebt;
 export type StockHistoryResponse = {
   annual: { year: number; revenue: number; fcf: number; epsDiluted: number | null }[];
   quarterly: QuarterPoint[];
+  // TEMPORARY DIAGNOSTIC — remove once EPS sourcing is confirmed working correctly.
+  debugEps?: {
+    edgarYearsWithEps: number;
+    fmpYearsWithEps: number;
+    edgarAnnualLength: number;
+    fmpAnnualLength: number;
+    usedSource: "edgar" | "fmp";
+    rawEdgarEps: { year: number; eps: number | null }[];
+    rawFmpEps: { year: number; eps: number | null }[];
+  };
 };
 
 export const getStockHistory = createServerFn({ method: "GET" })
@@ -1098,7 +1108,17 @@ export const getStockHistory = createServerFn({ method: "GET" })
       epsDiluted: a.epsDiluted ?? fmpEpsByYear.get(a.year) ?? null,
     }));
 
-    return { annual, quarterly: edgarHistory?.quarterly ?? [] };
+    const debugEps = {
+      edgarYearsWithEps: (edgarAnnual ?? []).filter((a) => a.epsDiluted != null).length,
+      fmpYearsWithEps: fmpAnnual.filter((a) => a.epsDiluted != null).length,
+      edgarAnnualLength: edgarAnnual?.length ?? 0,
+      fmpAnnualLength: fmpAnnual.length,
+      usedSource: (edgarAnnual && edgarAnnual.length > fmpAnnual.length ? "edgar" : "fmp") as "edgar" | "fmp",
+      rawEdgarEps: (edgarAnnual ?? []).map((a) => ({ year: a.year, eps: a.epsDiluted })),
+      rawFmpEps: fmpAnnual.map((a) => ({ year: a.year, eps: a.epsDiluted })),
+    };
+
+    return { annual, quarterly: edgarHistory?.quarterly ?? [], debugEps };
   });
 
 // ---------- Moat analysis (AI-generated, Google Gemini) ----------
