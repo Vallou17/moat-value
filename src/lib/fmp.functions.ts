@@ -391,8 +391,14 @@ async function fetchEdgarConcept(cik: string, tags: string[], unit: string = "US
         `https://data.sec.gov/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`,
         { headers: EDGAR_HEADERS },
       );
-      if (!res.ok) continue;
+      if (!res.ok) {
+        if (unit !== "USD") console.error(`[EDGAR-DEBUG] ${tag} (${unit}) for CIK${cik}: HTTP ${res.status}`);
+        continue;
+      }
       const json = await res.json();
+      if (unit !== "USD") {
+        console.error(`[EDGAR-DEBUG] ${tag} (${unit}) for CIK${cik}: units keys = ${Object.keys(json?.units ?? {}).join(",")}`);
+      }
       const usd = json?.units?.[unit];
       if (!Array.isArray(usd)) continue;
       for (const entry of usd) {
@@ -413,8 +419,8 @@ async function fetchEdgarConcept(cik: string, tags: string[], unit: string = "US
           out.set(year, { val: Number(entry.val), filed });
         }
       }
-    } catch {
-      // try next tag
+    } catch (err) {
+      if (unit !== "USD") console.error(`[EDGAR-DEBUG] ${tag} (${unit}) for CIK${cik}: threw`, err);
     }
   }
   const simple = new Map<number, number>();
