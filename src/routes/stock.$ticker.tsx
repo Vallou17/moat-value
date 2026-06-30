@@ -1009,16 +1009,13 @@ function CombinedChart({
   });
 
   const isLoading = isHistoryLoading || priceQuery.isLoading;
+  const priceCandles = priceQuery.data;
 
-  // Annual points within the selected price window — the indicator chart only makes
-  // sense for years we also have price data for, so we don't show a fundamentals bar
-  // with no corresponding price context.
   const yearsInRange = useMemo(() => {
-    const candles = priceQuery.data;
-    if (!candles || candles.length === 0) return [];
-    const years = new Set(candles.map((c) => Number(c.date.slice(0, 4))));
+    if (!priceCandles || priceCandles.length === 0) return [];
+    const years = new Set(priceCandles.map((c) => Number(c.date.slice(0, 4))));
     return Array.from(years).sort((a, b) => a - b);
-  }, [priceQuery.data]);
+  }, [priceCandles]);
 
   const annualByYear = useMemo(() => {
     const map = new Map<number, { revenue: number; fcf: number; epsDiluted: number | null }>();
@@ -1026,64 +1023,62 @@ function CombinedChart({
     return map;
   }, [history]);
 
-  // Indicator value per year, plus whether the whole series is "all positive" (safe to
-  // show as % change) or has a negative/zero base value (shown as absolute value instead,
-  // per the agreed approach — a % change from a negative base is mathematically misleading).
   const indicatorByYear = useMemo(() => {
     const out = new Map<number, number | null>();
     for (const year of yearsInRange) {
       const annual = annualByYear.get(year);
       if (indicator === "peTTM") {
         const eps = annual?.epsDiluted;
-        const avgPrice = priceQuery.data ? averageClosePriceForYear(priceQuery.data, year) : null;
+        const avgPrice = priceCandles ? averageClosePriceForYear(priceCandles, year) : null;
         out.set(year, eps != null && eps > 0 && avgPrice != null ? avgPrice / eps : null);
+      } else if (indicator === "epsDiluted") {
+        out.set(year, annual?.epsDiluted ?? null);
       } else {
-        out.set(year, annual ? (annual[indicator] as number | null) : null);
+        out.set(year, annual ? annual[indicator] : null);
       }
     }
     return out;
-  }, [yearsInRange, annualByYear, indicator, priceQuery.data]);
+  }, [yearsInRange, annualByYear, indicator, priceCandles]);
 
-  const indicatorValues = useMemo(
-    () => Array.from(indicatorByYear.values()).filter((v): v is number => v != null),
+  // How many years in the visible range actually have a value for this indicator —
+  // shown to the user when it's 0, so "no data" is distinguishable from "still loading"
+  // or a silent bug, instead of just rendering an empty chart with no explanation.
+  const yearsWithData = useMemo(
+    () => Array.from(indicatorByYear.values()).filter((v) => v != null).length,
     [indicatorByYear],
   );
-  const indicatorBaseValue = indicatorValues[0];
-  // P/E is already a ratio, not a flow — showing it as "% change in P/E" is a legitimate
-  // and common comparison, so it follows the same all-positive rule as the others.
-  const canShowIndicatorAsPct =
-    indicatorValues.length > 0 && indicatorBaseValue != null && indicatorBaseValue > 0 && indicatorValues.every((v) => v > 0);
 
-  const priceCandles = priceQuery.data;
   const priceBase = priceCandles && priceCandles.length > 0 ? priceCandles[0].close : null;
 
-  // One row per trading day. The price is naturally continuous (daily candles). The
-  // indicator only has one value per year, so we hold it constant across every day of
-  // that year (a "step" line) — this is what makes it render as a continuous, visible
-  // line instead of a single isolated point per year that Recharts may not connect.
+  // One row per trading day: price as a continuous absolute line, indicator held constant
+  // across each year (step line) since it only has one value per year.
   const chartData = useMemo(() => {
-    if (!priceCandles || priceCandles.length === 0 || !priceBase) return [];
+    if (!priceCandles || priceCandles.length === 0) return [];
     return priceCandles.map((c) => {
       const y = Number(c.date.slice(0, 4));
-      const indicatorRaw = indicatorByYear.get(y) ?? null;
-      const indicatorPlotValue =
-        indicatorRaw == null
-          ? null
-          : canShowIndicatorAsPct && indicatorBaseValue
-            ? (indicatorRaw / indicatorBaseValue - 1) * 100
-            : indicatorRaw;
       return {
         date: c.date,
-        pricePct: ((c.close - priceBase) / priceBase) * 100,
-        indicatorValue: indicatorPlotValue,
-        indicatorRaw,
+        price: c.close,
+        pricePctFromStart: priceBase ? ((c.close - priceBase) / priceBase) * 100 : null,
+        indicatorValue: indicatorByYear.get(y) ?? null,
       };
     });
-  }, [priceCandles, priceBase, indicatorByYear, canShowIndicatorAsPct, indicatorBaseValue]);
+  }, [priceCandles, priceBase, indicatorByYear]);
 
-  // One tick per calendar year (first trading day we have for that year) — instead of
-  // letting Recharts auto-space ticks by pixel density, which can place 2+ ticks inside
-  // the same year and make the axis show repeated year labels.
+  // % change of the indicator from the first year with data to each subsequent year —
+  // shown in the tooltip alongside the absolute value.
+  const indicatorPctFromStart = useMemo(() => {
+    const out = new Map<number, number | null>();
+    const firstValue = yearsInRange.map((y) => indicatorByYear.get(y)).find((v) => v != null);
+    for (const year of yearsInRange) {
+      const v = indicatorByYear.get(year);
+      out.set(year, v != null && firstValue != null && firstValue !== 0 ? ((v - firstValue) / Math.abs(firstValue)) * 100 : null);
+    }
+    return out;
+  }, [yearsInRange, indicatorByYear]);
+
+  // One tick per calendar year, instead of letting Recharts auto-space ticks by pixel
+  // density (which was placing 2+ ticks inside the same year and repeating year labels).
   const xTicks = useMemo(() => {
     if (!priceCandles || priceCandles.length === 0) return [];
     const seen = new Set<string>();
@@ -1097,6 +1092,12 @@ function CombinedChart({
     }
     return ticks;
   }, [priceCandles]);
+
+  function formatIndicatorValue(v: number): string {
+    if (indicator === "peTTM") return `${v.toFixed(1)}x`;
+    if (indicator === "epsDiluted") return fmtMoney(v, currency);
+    return fmtCompact(v, currency);
+  }
 
   return (
     <Card className="p-4 sm:p-5">
@@ -1140,7 +1141,12 @@ function CombinedChart({
           <div className="h-full w-full animate-pulse rounded bg-muted/40" />
         ) : chartData.length === 0 ? (
           <div className="grid h-full place-items-center text-sm text-muted-foreground">
-            Dados indisponíveis para esta ação
+            Dados de cotação indisponíveis para esta ação
+          </div>
+        ) : yearsWithData === 0 ? (
+          <div className="grid h-full place-items-center px-4 text-center text-sm text-muted-foreground">
+            Não há dados de "{COMBINED_INDICATOR_LABELS[indicator]}" disponíveis para esta ação
+            no período selecionado.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -1158,7 +1164,7 @@ function CombinedChart({
                 yAxisId="price"
                 orientation="left"
                 tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                tickFormatter={(v) => fmtCompact(Number(v), currency).replace(/[A-Z$€]/g, "")}
                 tickLine={false}
                 width={48}
               />
@@ -1167,11 +1173,9 @@ function CombinedChart({
                 orientation="right"
                 tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                 tickFormatter={(v) =>
-                  canShowIndicatorAsPct
-                    ? `${Number(v).toFixed(0)}%`
-                    : indicator === "peTTM"
-                      ? `${Number(v).toFixed(0)}x`
-                      : fmtCompact(Number(v), currency).replace(/[A-Z$€]/g, "")
+                  indicator === "peTTM"
+                    ? `${Number(v).toFixed(0)}x`
+                    : fmtCompact(Number(v), currency).replace(/[A-Z$€]/g, "")
                 }
                 tickLine={false}
                 width={56}
@@ -1187,11 +1191,17 @@ function CombinedChart({
                 }}
                 labelStyle={{ color: "var(--popover-foreground)" }}
                 itemStyle={{ color: "var(--popover-foreground)" }}
-                formatter={(value: number, name: string) => {
-                  if (name === "Cotação") return [`${value.toFixed(1)}%`, name];
-                  if (canShowIndicatorAsPct) return [`${Number(value).toFixed(1)}%`, COMBINED_INDICATOR_LABELS[indicator]];
-                  if (indicator === "peTTM") return [`${Number(value).toFixed(1)}x`, COMBINED_INDICATOR_LABELS[indicator]];
-                  return [fmtCompact(Number(value), currency), COMBINED_INDICATOR_LABELS[indicator]];
+                labelFormatter={(d) => String(d)}
+                formatter={(value: number, name: string, item: any) => {
+                  if (name === "Cotação") {
+                    const pct = priceBase ? ((value - priceBase) / priceBase) * 100 : null;
+                    const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
+                    return [`${fmtMoney(value, currency)}${pctStr}`, name];
+                  }
+                  const year = Number(String(item?.payload?.date ?? "").slice(0, 4));
+                  const pct = indicatorPctFromStart.get(year);
+                  const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
+                  return [`${formatIndicatorValue(value)}${pctStr}`, COMBINED_INDICATOR_LABELS[indicator]];
                 }}
               />
               <Line
@@ -1208,7 +1218,7 @@ function CombinedChart({
               <Line
                 yAxisId="price"
                 type="monotone"
-                dataKey="pricePct"
+                dataKey="price"
                 name="Cotação"
                 stroke="#B794F4"
                 strokeWidth={2}
@@ -1220,9 +1230,10 @@ function CombinedChart({
         )}
       </div>
       <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-        {canShowIndicatorAsPct
-          ? `Ambas as séries mostram a variação % desde o início do período (${range === "5A" ? "5 anos" : "10 anos"}).`
-          : `A cotação mostra variação % desde o início do período; "${COMBINED_INDICATOR_LABELS[indicator]}" é apresentado em valor absoluto porque teve um valor negativo ou nulo no ano base, o que tornaria a variação % enganosa.`}
+        Linha roxa: cotação ({currency}, eixo esquerdo). Linha azul:{" "}
+        {COMBINED_INDICATOR_LABELS[indicator]} ({indicator === "peTTM" ? "x" : currency}, eixo
+        direito). Passa o rato sobre o gráfico para ver o valor e a variação % desde o início
+        do período.
       </p>
     </Card>
   );
