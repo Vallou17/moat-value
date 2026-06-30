@@ -19,6 +19,8 @@ import {
 import {
   Bar,
   BarChart,
+  ComposedChart,
+  Line,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -29,9 +31,11 @@ import {
   getStockData,
   getStockHistory,
   getMoatAnalysis,
+  getIndexHistory,
   type StockData,
   type StockHistoryResponse,
   type MoatCategoryResult,
+  type Candle,
 } from "@/lib/fmp.functions";
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { computeDcf, discountPremiumPct } from "@/lib/dcf";
@@ -109,6 +113,7 @@ function StockView({
   const navigate = useNavigate();
   const { user } = useAuth();
   const [inWatch, setInWatch] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "combined">("overview");
   const [savingWatch, setSavingWatch] = useState(false);
 
   // Fetched lazily (separate from getStockData) — only needs companyName/sector/industry,
@@ -320,6 +325,36 @@ const defaults = useMemo(
         />
       </div>
 
+      {/* Tabs */}
+      <div className="mt-6 flex gap-1 border-b border-border/60">
+        <button
+          type="button"
+          onClick={() => setActiveTab("overview")}
+          className={
+            "border-b-2 px-3 py-2 text-sm font-medium transition-colors " +
+            (activeTab === "overview"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground")
+          }
+        >
+          Visão Geral
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("combined")}
+          className={
+            "border-b-2 px-3 py-2 text-sm font-medium transition-colors " +
+            (activeTab === "combined"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground")
+          }
+        >
+          Cotação vs Fundamentais
+        </button>
+      </div>
+
+      {activeTab === "overview" && (
+        <>
       {/* Price history chart */}
       <div className="mt-6">
         <PriceHistoryChart
@@ -455,6 +490,19 @@ const defaults = useMemo(
           )}
         </Card>
       </section>
+        </>
+      )}
+
+      {activeTab === "combined" && (
+        <div className="mt-6">
+          <CombinedChart
+            ticker={data.ticker}
+            currency={data.currency}
+            history={historyQuery.data}
+            isHistoryLoading={historyQuery.isLoading}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -916,6 +964,252 @@ function ChartCard({
         )}
       </div>
     </div>
+  );
+}
+
+type CombinedRange = "5A" | "10A";
+type CombinedIndicator = "revenue" | "fcf" | "epsDiluted" | "peTTM";
+
+const COMBINED_INDICATOR_LABELS: Record<CombinedIndicator, string> = {
+  revenue: "Receita",
+  fcf: "Free Cash Flow",
+  epsDiluted: "EPS Diluído",
+  peTTM: "P/E",
+};
+
+// Average closing price for a calendar year, from a daily candle series — used to derive
+// a historical P/E (avg price / EPS that year) on the client, since we already have both
+// series loaded here and don't need a separate server round-trip for it.
+function averageClosePriceForYear(candles: Candle[], year: number): number | null {
+  const yearCandles = candles.filter((c) => c.date.slice(0, 4) === String(year));
+  if (yearCandles.length === 0) return null;
+  const sum = yearCandles.reduce((s, c) => s + c.close, 0);
+  return sum / yearCandles.length;
+}
+
+function CombinedChart({
+  ticker,
+  currency,
+  history,
+  isHistoryLoading,
+}: {
+  ticker: string;
+  currency: string;
+  history: StockHistoryResponse | undefined;
+  isHistoryLoading?: boolean;
+}) {
+  const [range, setRange] = useState<CombinedRange>("5A");
+  const [indicator, setIndicator] = useState<CombinedIndicator>("revenue");
+
+  const priceQuery = useQuery<Candle[]>({
+    queryKey: ["combined-price-history", ticker, range],
+    queryFn: () => getIndexHistory({ data: { symbol: ticker, range } }),
+    staleTime: 30 * 60_000,
+    gcTime: 60 * 60_000,
+  });
+
+  const isLoading = isHistoryLoading || priceQuery.isLoading;
+
+  // Annual points within the selected price window — the indicator chart only makes
+  // sense for years we also have price data for, so we don't show a fundamentals bar
+  // with no corresponding price context.
+  const yearsInRange = useMemo(() => {
+    const candles = priceQuery.data;
+    if (!candles || candles.length === 0) return [];
+    const years = new Set(candles.map((c) => Number(c.date.slice(0, 4))));
+    return Array.from(years).sort((a, b) => a - b);
+  }, [priceQuery.data]);
+
+  const annualByYear = useMemo(() => {
+    const map = new Map<number, { revenue: number; fcf: number; epsDiluted: number | null }>();
+    for (const a of history?.annual ?? []) map.set(a.year, a);
+    return map;
+  }, [history]);
+
+  // Indicator value per year, plus whether the whole series is "all positive" (safe to
+  // show as % change) or has a negative/zero base value (shown as absolute value instead,
+  // per the agreed approach — a % change from a negative base is mathematically misleading).
+  const indicatorByYear = useMemo(() => {
+    const out = new Map<number, number | null>();
+    for (const year of yearsInRange) {
+      const annual = annualByYear.get(year);
+      if (indicator === "peTTM") {
+        const eps = annual?.epsDiluted;
+        const avgPrice = priceQuery.data ? averageClosePriceForYear(priceQuery.data, year) : null;
+        out.set(year, eps != null && eps > 0 && avgPrice != null ? avgPrice / eps : null);
+      } else {
+        out.set(year, annual ? (annual[indicator] as number | null) : null);
+      }
+    }
+    return out;
+  }, [yearsInRange, annualByYear, indicator, priceQuery.data]);
+
+  const indicatorValues = useMemo(
+    () => Array.from(indicatorByYear.values()).filter((v): v is number => v != null),
+    [indicatorByYear],
+  );
+  const indicatorBaseValue = indicatorValues[0];
+  // P/E is already a ratio, not a flow — showing it as "% change in P/E" is a legitimate
+  // and common comparison, so it follows the same all-positive rule as the others.
+  const canShowIndicatorAsPct =
+    indicatorValues.length > 0 && indicatorBaseValue != null && indicatorBaseValue > 0 && indicatorValues.every((v) => v > 0);
+
+  const priceCandles = priceQuery.data;
+  const priceBase = priceCandles && priceCandles.length > 0 ? priceCandles[0].close : null;
+
+  // One row per trading day, with the price as a continuous % line and the indicator
+  // attached only on the last trading day of each year (so it renders as one bar per
+  // year rather than a bar repeated on every single day).
+  const chartData = useMemo(() => {
+    if (!priceCandles || priceCandles.length === 0 || !priceBase) return [];
+    const lastDayOfYear = new Map<number, string>();
+    for (const c of priceCandles) {
+      const y = Number(c.date.slice(0, 4));
+      lastDayOfYear.set(y, c.date); // candles are chronological, so this ends up as the last one
+    }
+    return priceCandles.map((c) => {
+      const y = Number(c.date.slice(0, 4));
+      const isYearEnd = lastDayOfYear.get(y) === c.date;
+      const indicatorRaw = isYearEnd ? indicatorByYear.get(y) ?? null : null;
+      const indicatorPlotValue =
+        indicatorRaw == null
+          ? null
+          : canShowIndicatorAsPct && indicatorBaseValue
+            ? (indicatorRaw / indicatorBaseValue - 1) * 100
+            : indicatorRaw;
+      return {
+        date: c.date,
+        pricePct: ((c.close - priceBase) / priceBase) * 100,
+        indicatorValue: indicatorPlotValue,
+        indicatorRaw,
+      };
+    });
+  }, [priceCandles, priceBase, indicatorByYear, canShowIndicatorAsPct, indicatorBaseValue]);
+
+  return (
+    <Card className="p-4 sm:p-5">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:text-sm">
+          <BarChart3 className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" /> Cotação vs
+          Fundamentais
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-1">
+            {(["revenue", "fcf", "epsDiluted", "peTTM"] as CombinedIndicator[]).map((opt) => (
+              <Button
+                key={opt}
+                variant={indicator === opt ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setIndicator(opt)}
+              >
+                {COMBINED_INDICATOR_LABELS[opt]}
+              </Button>
+            ))}
+          </div>
+          <div className="flex gap-1">
+            {(["5A", "10A"] as CombinedRange[]).map((r) => (
+              <Button
+                key={r}
+                variant={range === r ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setRange(r)}
+              >
+                {r}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="h-72 sm:h-96">
+        {isLoading ? (
+          <div className="h-full w-full animate-pulse rounded bg-muted/40" />
+        ) : chartData.length === 0 ? (
+          <div className="grid h-full place-items-center text-sm text-muted-foreground">
+            Dados indisponíveis para esta ação
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                tickFormatter={(d) => String(d).slice(0, 4)}
+                tickLine={false}
+                minTickGap={40}
+              />
+              <YAxis
+                yAxisId="price"
+                orientation="left"
+                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                tickLine={false}
+                width={48}
+              />
+              <YAxis
+                yAxisId="indicator"
+                orientation="right"
+                tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                tickFormatter={(v) =>
+                  canShowIndicatorAsPct
+                    ? `${Number(v).toFixed(0)}%`
+                    : indicator === "peTTM"
+                      ? `${Number(v).toFixed(0)}x`
+                      : fmtCompact(Number(v), currency).replace(/[A-Z$€]/g, "")
+                }
+                tickLine={false}
+                width={56}
+              />
+              <Tooltip
+                cursor={{ stroke: "var(--border)" }}
+                contentStyle={{
+                  background: "var(--popover)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  color: "var(--popover-foreground)",
+                }}
+                labelStyle={{ color: "var(--popover-foreground)" }}
+                itemStyle={{ color: "var(--popover-foreground)" }}
+                formatter={(value: number, name: string) => {
+                  if (name === "Cotação") return [`${value.toFixed(1)}%`, name];
+                  if (canShowIndicatorAsPct) return [`${Number(value).toFixed(1)}%`, COMBINED_INDICATOR_LABELS[indicator]];
+                  if (indicator === "peTTM") return [`${Number(value).toFixed(1)}x`, COMBINED_INDICATOR_LABELS[indicator]];
+                  return [fmtCompact(Number(value), currency), COMBINED_INDICATOR_LABELS[indicator]];
+                }}
+              />
+              <Bar
+                yAxisId="indicator"
+                dataKey="indicatorValue"
+                name={COMBINED_INDICATOR_LABELS[indicator]}
+                fill="#4F46E5"
+                opacity={0.55}
+                radius={[4, 4, 0, 0]}
+                isAnimationActive={false}
+              />
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="pricePct"
+                name="Cotação"
+                stroke="#B794F4"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+      <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
+        {canShowIndicatorAsPct
+          ? `Ambas as séries mostram a variação % desde o início do período (${range === "5A" ? "5 anos" : "10 anos"}).`
+          : `A cotação mostra variação % desde o início do período; "${COMBINED_INDICATOR_LABELS[indicator]}" é apresentado em valor absoluto porque teve um valor negativo ou nulo no ano base, o que tornaria a variação % enganosa.`}
+      </p>
+    </Card>
   );
 }
 
