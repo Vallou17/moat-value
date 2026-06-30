@@ -374,7 +374,11 @@ const CAPEX_TAGS = [
   "PaymentsToAcquireProductiveAssets", // Amazon (and a few others) use this since FY2016
   "PaymentsForCapitalImprovements",
 ];
-const EPS_DILUTED_TAGS = ["EarningsPerShareDiluted"];
+const EPS_DILUTED_TAGS = [
+  "EarningsPerShareDiluted",
+  "EarningsPerShareDilutedAndBasic", // some smaller/simpler filers report only one combined tag
+  "IncomeLossFromContinuingOperationsPerDilutedShare",
+];
 
 async function fetchEdgarConcept(cik: string, tags: string[], unit: string = "USD"): Promise<Map<number, number>> {
   // Returns a map of period-year -> value, using the first tag that has data for each year.
@@ -1073,7 +1077,17 @@ export const getStockHistory = createServerFn({ method: "GET" })
 
     // Prefer SEC EDGAR's annual series when it covers more years than FMP's plan allows.
     const edgarAnnual = edgarHistory?.annual ?? null;
-    const annual = edgarAnnual && edgarAnnual.length > fmpAnnual.length ? edgarAnnual : fmpAnnual;
+    const baseAnnual = edgarAnnual && edgarAnnual.length > fmpAnnual.length ? edgarAnnual : fmpAnnual;
+
+    // epsDiluted specifically is backfilled from whichever source has it for a given year —
+    // EDGAR's tag coverage varies by filer (some use less common XBRL tags we don't try),
+    // so even when EDGAR "wins" for revenue/FCF history length, FMP may still have EPS for
+    // the same years and shouldn't be discarded just because the other source was chosen.
+    const fmpEpsByYear = new Map(fmpAnnual.map((a) => [a.year, a.epsDiluted]));
+    const annual = baseAnnual.map((a) => ({
+      ...a,
+      epsDiluted: a.epsDiluted ?? fmpEpsByYear.get(a.year) ?? null,
+    }));
 
     return { annual, quarterly: edgarHistory?.quarterly ?? [] };
   });
