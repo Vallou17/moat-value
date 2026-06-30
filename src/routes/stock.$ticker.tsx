@@ -1216,15 +1216,17 @@ function CombinedChart({
 
       {!isLoading && chartData.length > 0 && (
         <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">Cotação — período / homólogo</span>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">Variação da Cotação - 10 anos / último ano</span>
             <span className="font-medium">
               <PctBadge pct={priceFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
               <PctBadge pct={priceYoy} />
             </span>
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">{COMBINED_INDICATOR_LABELS[indicator]} — período / homólogo</span>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">
+              Variação {COMBINED_INDICATOR_LABELS[indicator]} - 10 anos / último ano
+            </span>
             <span className="font-medium">
               <PctBadge pct={indicatorFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
               <PctBadge pct={indicatorYoy} />
@@ -1349,7 +1351,7 @@ function CombinedChart({
                 type="monotone"
                 dataKey="price"
                 name="Cotação"
-                stroke="#B794F4"
+                stroke="#F2C744"
                 strokeWidth={2}
                 dot={false}
                 isAnimationActive={false}
