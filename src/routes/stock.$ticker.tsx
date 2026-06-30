@@ -805,7 +805,7 @@ function fmtRatio(n: number | null): string {
 // Custom bar shape: the bar under the cursor gets brightened instead of the default
 // Recharts grey "cursor" rectangle behind the whole category. Mirrors the hover treatment
 // used on the intrinsic-value Gauge, where the highlight lives on the shape itself.
-function makeHighlightBar(activeIndex: number | null, gradientId: string) {
+function makeHighlightBar(activeIndex: number | null, gradientId: string, fixedWidth?: number) {
   return function HighlightBar(props: any) {
     const { x, y, width, height, index } = props;
     if (!Number.isFinite(height) || !Number.isFinite(y)) return null;
@@ -817,11 +817,18 @@ function makeHighlightBar(activeIndex: number | null, gradientId: string) {
     const top = height < 0 ? y + height : y;
     const isActive = index === activeIndex;
 
+    // When the chart's x-axis has far more category slots than bars (e.g. daily price
+    // points but only ~40 quarterly bars), Recharts' auto-computed `width` shrinks to a
+    // sliver. `fixedWidth` overrides that with an explicit pixel width, re-centered on
+    // the bar's original x position so it still lines up with its data point.
+    const barWidth = fixedWidth ?? width;
+    const barX = fixedWidth != null ? x + width / 2 - fixedWidth / 2 : x;
+
     return (
       <rect
-        x={x}
+        x={barX}
         y={top}
-        width={width}
+        width={barWidth}
         height={Math.max(absHeight, 1)}
         rx={6}
         ry={6}
@@ -1126,7 +1133,12 @@ function CombinedChart({
       return {
         date: c.date,
         price: c.close,
-        indicatorValue: isQuarterEnd ? indicatorByQuarter.get(key) ?? null : null,
+        // Only set on the quarter's last trading day, so the <Bar> renders one bar per
+        // quarter instead of a bar repeated across every day.
+        indicatorBarValue: isQuarterEnd ? indicatorByQuarter.get(key) ?? null : null,
+        // Set on every day of the quarter, so hovering anywhere in that quarter (not just
+        // its last day) still shows the indicator's value and % change in the tooltip.
+        indicatorTooltipValue: indicatorByQuarter.get(key) ?? null,
         quarterKey: key,
       };
     });
@@ -1300,6 +1312,7 @@ function CombinedChart({
                     const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
                     return [`${fmtMoney(value, currency)}${pctStr}`, name];
                   }
+                  if (value == null) return null;
                   const key = String(item?.payload?.quarterKey ?? "");
                   const pct = indicatorPctFromStart.get(key);
                   const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
@@ -1308,10 +1321,28 @@ function CombinedChart({
               />
               <Bar
                 yAxisId="indicator"
-                dataKey="indicatorValue"
+                dataKey="indicatorBarValue"
                 name={COMBINED_INDICATOR_LABELS[indicator]}
+                legendType="none"
                 isAnimationActive={false}
-                shape={makeHighlightBar(activeIndex, gradientId) as any}
+                shape={makeHighlightBar(activeIndex, gradientId, 18) as any}
+              />
+              {/* Invisible line carrying the indicator's value on every day of its quarter
+                  (not just the quarter's last day, where the bar itself sits) — this is
+                  what lets the tooltip show the indicator's value/variation no matter which
+                  day within that quarter the user is hovering over. */}
+              <Line
+                yAxisId="indicator"
+                type="stepAfter"
+                dataKey="indicatorTooltipValue"
+                name={COMBINED_INDICATOR_LABELS[indicator]}
+                stroke="transparent"
+                strokeWidth={0}
+                dot={false}
+                activeDot={false}
+                legendType="none"
+                connectNulls
+                isAnimationActive={false}
               />
               <Line
                 yAxisId="price"
