@@ -383,6 +383,7 @@ const EPS_DILUTED_TAGS = [
 // varies by filer — confirmed via diagnostic logging that Amazon (and likely others) use
 // "USD/shares" instead. We try every known variant in order rather than assume one fixed key.
 const EPS_UNIT_CANDIDATES = ["USD/shares", "USD-per-shares", "USD-per-share"];
+const NET_INCOME_TAGS = ["NetIncomeLoss", "ProfitLoss"];
 
 async function fetchEdgarConcept(
   cik: string,
@@ -493,6 +494,8 @@ export type QuarterPoint = {
   revenue: number;
   fcf: number;
   epsDiluted: number | null;
+  netIncome: number | null;
+  sharesOutstanding: number | null;
 };
 
 // Builds per-quarter Revenue/OperatingCF/CAPEX maps for one XBRL concept across all its tags,
@@ -694,11 +697,17 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
   const cik = await getCikForTicker(ticker);
   if (!cik) return null;
 
-  const [revenueParts, opCfParts, capexParts, epsParts] = await Promise.all([
+  const [revenueParts, opCfParts, capexParts, epsParts, netIncomeParts, sharesOutstanding] = await Promise.all([
     fetchEdgarConceptByPeriod(cik, REVENUE_TAGS),
     fetchEdgarConceptByPeriod(cik, OPERATING_CF_TAGS),
     fetchEdgarConceptByPeriod(cik, CAPEX_TAGS),
     fetchEdgarConceptByPeriod(cik, EPS_DILUTED_TAGS, EPS_UNIT_CANDIDATES),
+    fetchEdgarConceptByPeriod(cik, NET_INCOME_TAGS),
+    // Shares outstanding barely moves quarter to quarter relative to the precision P/E
+    // needs — using the single most recent reported count for every historical quarter
+    // is a reasonable simplification, and far simpler than tracking it as an instant fact
+    // per quarter (which XBRL doesn't really support cleanly anyway).
+    fetchEdgarLatestInstant(cik, SHARES_OUTSTANDING_TAGS),
   ]);
 
   const allYears = new Set<number>([
@@ -735,6 +744,16 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
       {},
       epsParts.dedupedIsolated.get(year),
     );
+    // Unlike EPS, Net Income IS a cumulative flow (like revenue) — YTD figures can be
+    // safely subtracted to isolate a single quarter, giving us far more coverage than
+    // isolated-quarter EPS facts alone. This is what backs the trailing-twelve-months
+    // P/E calculation on the client (TTM net income ÷ latest share count), since summing
+    // 4 quarters of EPS directly fails whenever even one quarter lacks an isolated fact.
+    const netIncomeQ = reconstructQuarters(
+      year,
+      netIncomeParts.years.get(year) ?? {},
+      netIncomeParts.dedupedIsolated.get(year),
+    );
 
     for (let i = 0; i < 4; i++) {
       const rev = revQ[i];
@@ -750,6 +769,8 @@ async function fetchEdgarHistoryQuarterlyFresh(ticker: string): Promise<QuarterP
         revenue: rev,
         fcf,
         epsDiluted: epsQ[i],
+        netIncome: netIncomeQ[i],
+        sharesOutstanding,
       });
     }
   }
