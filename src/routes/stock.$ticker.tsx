@@ -1135,20 +1135,7 @@ function CombinedChart({
     return out;
   }, [quarterlyByKey]);
 
-  // Nearest quarter (by chronological distance) to `key` that has implied-shares data —
-  // used as the share-count basis when a quarter itself lacks an isolated EPS fact.
-  function nearestImpliedShares(key: string): number | null {
-    const idx = sortedQuarterKeys.indexOf(key);
-    if (idx === -1) return impliedSharesByQuarter.size > 0 ? impliedSharesByQuarter.values().next().value : null;
-    for (let dist = 0; dist < sortedQuarterKeys.length; dist++) {
-      const before = sortedQuarterKeys[idx - dist];
-      const after = sortedQuarterKeys[idx + dist];
-      if (before != null && impliedSharesByQuarter.has(before)) return impliedSharesByQuarter.get(before)!;
-      if (after != null && impliedSharesByQuarter.has(after)) return impliedSharesByQuarter.get(after)!;
-      if (before == null && after == null) break;
-    }
-    return null;
-  }
+
 
   // Trailing-twelve-months EPS ending in a given quarter, ALWAYS via trailing net income ÷
   // implied share count from the nearest reliable quarter. We previously also tried summing
@@ -1160,6 +1147,32 @@ function CombinedChart({
   // through net-income ÷ implied-shares removes that entire failure mode — at the cost of
   // being a slightly different methodology than a raw EPS sum, but a consistent and
   // split-safe one.
+  //
+  // A second failure mode remains even after fixing the outlier filter: a TTM window can
+  // straddle a split date itself (e.g. a window covering Q3 2021 through Q2 2022 spans
+  // Amazon's June-2022 20-for-1 split), or a quarter can be missing an isolated EPS fact
+  // (common for Q4, often only ever reported inside the annual 10-K). In both cases,
+  // `nearestImpliedShares` will still find SOME value if we let it search arbitrarily far,
+  // but that value may belong to a different share-count basis than the quarter it's being
+  // applied to — producing a P/E that's numerically valid-looking but meaningless. Rather
+  // than guess, we require the implied-shares figure to come from within 2 quarters of the
+  // one we're computing, and to be consistent (same order of magnitude) with whichever
+  // neighboring quarters in the window DO have their own implied-shares figure. If no
+  // sufficiently close, consistent basis exists, we return null — the chart should show a
+  // gap for that quarter rather than a misleading bar.
+  const MAX_SHARES_LOOKUP_DISTANCE = 2;
+  function nearbyConsistentImpliedShares(key: string): number | null {
+    const idx = sortedQuarterKeys.indexOf(key);
+    if (idx === -1) return null;
+    for (let dist = 0; dist <= MAX_SHARES_LOOKUP_DISTANCE; dist++) {
+      const before = sortedQuarterKeys[idx - dist];
+      const after = sortedQuarterKeys[idx + dist];
+      if (before != null && impliedSharesByQuarter.has(before)) return impliedSharesByQuarter.get(before)!;
+      if (after != null && impliedSharesByQuarter.has(after)) return impliedSharesByQuarter.get(after)!;
+    }
+    return null;
+  }
+
   function epsTtmEndingAt(year: number, quarter: number): number | null {
     const quarterKeys: string[] = [];
     let y = year;
@@ -1179,8 +1192,20 @@ function CombinedChart({
       if (ni == null) return null;
       netIncomeSum += ni;
     }
-    const shares = nearestImpliedShares(quarterKeys[0]);
+    const shares = nearbyConsistentImpliedShares(quarterKeys[0]);
     if (shares == null || shares <= 0) return null;
+
+    // Guard against the window straddling a split: if any OTHER quarter in this same
+    // 4-quarter TTM window has its own directly-known implied-shares figure, it must be
+    // on the same basis (within the same ~3x band) as the one we're about to apply to the
+    // whole window. A quarter early in the window disagreeing by an order of magnitude is
+    // the signature of a split having occurred partway through — in that case there is no
+    // single share count that correctly applies to the whole window, so we bail out.
+    for (const k of quarterKeys) {
+      const direct = impliedSharesByQuarter.get(k);
+      if (direct != null && (direct < shares / 3 || direct > shares * 3)) return null;
+    }
+
     return netIncomeSum / shares;
   }
 
