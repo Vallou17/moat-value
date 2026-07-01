@@ -1028,7 +1028,27 @@ function CombinedChart({
   });
 
   const isLoading = isHistoryLoading || priceQuery.isLoading;
-  const priceCandles = priceQuery.data;
+
+  // Trim the price series to start at the first quarter that actually has fundamentals
+  // data. We always request a flat 10 years of price history, but EDGAR's coverage for a
+  // given ticker can start partway through that window (e.g. Amazon's earliest available
+  // quarter here is 2016-Q2, not 2016-Q1) — showing price candles from before any bar
+  // exists made the chart look like it was missing data, when the real issue was just an
+  // unused lead-in of price-only history with nothing to pair it with.
+  const priceCandles = useMemo(() => {
+    const all = priceQuery.data;
+    if (!all || all.length === 0) return all;
+    const quarterly = history?.quarterly;
+    if (!quarterly || quarterly.length === 0) return all;
+    const sorted = quarterly.slice().sort((a, b) => (a.year !== b.year ? a.year - b.year : a.quarter - b.quarter));
+    const first = sorted[0];
+    const cutoffIndex = all.findIndex((c) => {
+      const y = Number(c.date.slice(0, 4));
+      const q = quarterOfDate(c.date);
+      return y > first.year || (y === first.year && q >= first.quarter);
+    });
+    return cutoffIndex === -1 ? all : all.slice(cutoffIndex);
+  }, [priceQuery.data, history]);
 
   // "year-quarter" keys (e.g. "2025-3") present in the visible price range, in
   // chronological order — the quarterly indicator chart only makes sense for periods we
@@ -1407,7 +1427,7 @@ function CombinedChart({
       {!isLoading && chartData.length > 0 && (
         <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Variação da Cotação - 10 anos / último ano</span>
+            <span className="text-muted-foreground">Variação da Cotação desde início da série / no último ano</span>
             <span className="font-medium">
               <PctBadge pct={priceFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
               <PctBadge pct={priceYoy} />
@@ -1415,7 +1435,7 @@ function CombinedChart({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">
-              Variação {COMBINED_INDICATOR_LABELS[indicator]} - 10 anos / último ano
+              Variação {COMBINED_INDICATOR_LABELS[indicator]} desde início da série / no último ano
             </span>
             <span className="font-medium">
               <PctBadge pct={indicatorFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
