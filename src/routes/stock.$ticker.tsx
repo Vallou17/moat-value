@@ -989,15 +989,19 @@ function quarterOfDate(dateStr: string): number {
   return Math.ceil(month / 3);
 }
 
-// Average closing price within one calendar quarter of one year — used to derive a
-// quarterly P/E (avg price that quarter / EPS that quarter) on the client.
-function averageClosePriceForQuarter(candles: Candle[], year: number, quarter: number): number | null {
+// Closing price on the LAST trading day of a given calendar quarter/year — this mirrors
+// how FMP (and TTM ratios generally) compute a "current" P/E: price at a specific point in
+// time divided by trailing EPS, not an average price over the period. Using an average here
+// previously caused the combined-chart P/E to diverge from the P/E shown in the "Métricas e
+// Indicadores" card by several points even when the underlying EPS numbers roughly agreed.
+function closePriceAtQuarterEnd(candles: Candle[], year: number, quarter: number): number | null {
   const inQuarter = candles.filter(
     (c) => Number(c.date.slice(0, 4)) === year && quarterOfDate(c.date) === quarter,
   );
   if (inQuarter.length === 0) return null;
-  const sum = inQuarter.reduce((s, c) => s + c.close, 0);
-  return sum / inQuarter.length;
+  // candles are chronologically sorted (see getIndexHistory), so the last match is the
+  // most recent trading day within that quarter.
+  return inQuarter[inQuarter.length - 1].close;
 }
 
 function CombinedChart({
@@ -1056,12 +1060,15 @@ function CombinedChart({
 
   // Trailing-twelve-months P/E ending in a given quarter: trailing net income (summed
   // from that quarter and the 3 preceding ones), divided by the latest known share count.
-  // This is preferred over summing 4 quarters of diluted EPS directly, because EDGAR's
-  // isolated-quarter EPS facts have real coverage gaps for some filers (some quarters,
-  // often Q4, are only ever reported as part of the full-year 10-K, never in isolation) —
-  // a single missing EPS quarter breaks that sum entirely. Net income, being a cumulative
-  // flow like revenue, can be reconstructed from YTD filings the same way revenue is,
-  // giving much more complete trailing-twelve-months coverage.
+  // This is the ONLY path used (see epsTtmEndingAt below) — we deliberately never sum 4
+  // quarters of isolated diluted EPS directly, even when all 4 are present. Net income is
+  // immune to stock splits (a split changes EPS and share count but not net income itself),
+  // whereas a single pre-split isolated EPS fact slipping through — which has happened in
+  // EDGAR's data for split-heavy filers like Netflix (10-for-1 split) — silently corrupts a
+  // direct EPS sum by the split ratio, without necessarily tripping the outlier filter below
+  // (that filter only guards the *shares* lookup, not a direct EPS sum). Net income, being a
+  // cumulative flow like revenue, can be reconstructed from YTD filings the same way revenue
+  // is, giving much more complete and much more reliable trailing-twelve-months coverage.
   // All quarters with data, sorted chronologically — used to search for the nearest quarter
   // with "implied shares" data when filling P/E TTM gaps (see epsTtmEndingAt below). Built
   // from the full quarterly history, not just quartersInRange, so we can look slightly
@@ -1120,12 +1127,16 @@ function CombinedChart({
     return null;
   }
 
-  // Trailing-twelve-months P/E ending in a given quarter. Two paths, in order of accuracy:
-  //  1. If all 4 trailing quarters have an isolated, company-reported diluted EPS fact,
-  //     sum those directly — each is already correctly split-adjusted by the filer.
-  //  2. Otherwise, sum trailing net income (reconstructed from YTD filings, so it has near-
-  //     complete coverage) and divide by the implied share count from the nearest quarter
-  //     that has one — avoiding both "no data" gaps and stale/pre-split share counts.
+  // Trailing-twelve-months EPS ending in a given quarter, ALWAYS via trailing net income ÷
+  // implied share count from the nearest reliable quarter. We previously also tried summing
+  // 4 isolated diluted-EPS facts directly whenever all 4 were present, on the assumption that
+  // "the filer reported it, so it's correct". In practice that path was what let Netflix's
+  // P/E TTM come out far too low: at least one of those 4 isolated EPS facts was not
+  // split-adjusted, and summing doesn't catch that the way the median-based outlier filter
+  // on *implied shares* does. Net income is never affected by a split, so routing everything
+  // through net-income ÷ implied-shares removes that entire failure mode — at the cost of
+  // being a slightly different methodology than a raw EPS sum, but a consistent and
+  // split-safe one.
   function epsTtmEndingAt(year: number, quarter: number): number | null {
     const quarterKeys: string[] = [];
     let y = year;
@@ -1137,15 +1148,6 @@ function CombinedChart({
         q = 4;
         y -= 1;
       }
-    }
-
-    const epsValues = quarterKeys.map((k) => quarterlyByKey.get(k)?.epsDiluted ?? null);
-    // Only trust a direct sum of the 4 isolated EPS facts if none of those quarters was
-    // flagged as a split-inconsistent outlier above — otherwise a pre-split EPS fact could
-    // silently corrupt the sum even though all 4 values are individually non-null.
-    const allEpsConsistent = quarterKeys.every((k) => impliedSharesByQuarter.has(k));
-    if (epsValues.every((v) => v != null) && allEpsConsistent) {
-      return epsValues.reduce((sum: number, v) => sum + (v as number), 0);
     }
 
     let netIncomeSum = 0;
@@ -1165,8 +1167,8 @@ function CombinedChart({
       const q = quarterlyByKey.get(key);
       if (indicator === "peTTM") {
         const epsTtm = epsTtmEndingAt(year, quarter);
-        const avgPrice = priceCandles ? averageClosePriceForQuarter(priceCandles, year, quarter) : null;
-        out.set(key, epsTtm != null && epsTtm > 0 && avgPrice != null ? avgPrice / epsTtm : null);
+        const endPrice = priceCandles ? closePriceAtQuarterEnd(priceCandles, year, quarter) : null;
+        out.set(key, epsTtm != null && epsTtm > 0 && endPrice != null ? endPrice / epsTtm : null);
       } else if (indicator === "epsDiluted") {
         out.set(key, q?.epsDiluted ?? null);
       } else {
@@ -1187,18 +1189,19 @@ function CombinedChart({
   const priceBase = priceCandles && priceCandles.length > 0 ? priceCandles[0].close : null;
   const priceLatest = priceCandles && priceCandles.length > 0 ? priceCandles[priceCandles.length - 1].close : null;
 
-  // Average price within the most recent quarter and the same quarter one year earlier —
+  // Quarter-end price for the most recent quarter and the same quarter one year earlier —
   // used for the price's year-over-year ("homólogo") comparison in the summary box, mirroring
-  // how the indicator's YoY comparison works.
+  // how the indicator's YoY comparison works. Uses the same quarter-end convention as the
+  // P/E TTM calculation above, rather than an average, for consistency.
   const priceYoy = useMemo(() => {
     if (!priceCandles || quartersInRange.length === 0) return null;
     const latest = quartersInRange[quartersInRange.length - 1];
     const yearAgo = quartersInRange.find((q) => q.year === latest.year - 1 && q.quarter === latest.quarter);
     if (!yearAgo) return null;
-    const latestAvg = averageClosePriceForQuarter(priceCandles, latest.year, latest.quarter);
-    const yearAgoAvg = averageClosePriceForQuarter(priceCandles, yearAgo.year, yearAgo.quarter);
-    if (latestAvg == null || yearAgoAvg == null || yearAgoAvg === 0) return null;
-    return ((latestAvg - yearAgoAvg) / Math.abs(yearAgoAvg)) * 100;
+    const latestEnd = closePriceAtQuarterEnd(priceCandles, latest.year, latest.quarter);
+    const yearAgoEnd = closePriceAtQuarterEnd(priceCandles, yearAgo.year, yearAgo.quarter);
+    if (latestEnd == null || yearAgoEnd == null || yearAgoEnd === 0) return null;
+    return ((latestEnd - yearAgoEnd) / Math.abs(yearAgoEnd)) * 100;
   }, [priceCandles, quartersInRange]);
 
   // Indicator's year-over-year change: most recent quarter with data vs. the same calendar
