@@ -1335,7 +1335,7 @@ function CombinedChart({
             {history.quarterly.filter((q) => q.epsDiluted != null).length}
           </div>
           <div className="mt-1">
-            últimos 8: {JSON.stringify(history.quarterly.slice(-8).map((q) => ({
+            todos: {JSON.stringify(history.quarterly.map((q) => ({
               y: q.year,
               q: q.quarter,
               ni: q.netIncome,
