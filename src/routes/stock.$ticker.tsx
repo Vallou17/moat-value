@@ -1446,49 +1446,6 @@ function CombinedChart({
         </div>
       </div>
 
-      {/* TEMPORARY DIAGNOSTIC — remove once P/E TTM sourcing is confirmed working correctly. */}
-      {history?.quarterly && (
-        <div className="mb-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[11px] font-mono">
-          <div>
-            [DEBUG] trimestres totais: {history.quarterly.length} | c/ netIncome:{" "}
-            {history.quarterly.filter((q) => q.netIncome != null).length} | c/ sharesOutstanding:{" "}
-            {history.quarterly.filter((q) => q.sharesOutstanding != null).length} | c/ epsDiluted:{" "}
-            {history.quarterly.filter((q) => q.epsDiluted != null).length}
-          </div>
-          <div className="mt-1">
-            [DEBUG2] priceQuery.data.length: {priceQuery.data?.length ?? "undefined"} | priceCandles.length (pós-corte):{" "}
-            {priceCandles?.length ?? "undefined"} | primeiro candle bruto:{" "}
-            {priceQuery.data?.[0]?.date ?? "?"} | primeiro candle cortado: {priceCandles?.[0]?.date ?? "?"} | primeiro
-            trimestre history: {history.quarterly[0]?.year}-{history.quarterly[0]?.quarter} | xTicks:{" "}
-            {JSON.stringify(xTicks)}
-          </div>
-          <div className="mt-1">
-            [DEBUG3] datas nos índices de xTicks:{" "}
-            {JSON.stringify(xTicks.map((i) => ({ index: i, date: priceCandles?.[i]?.date ?? null })))}
-          </div>
-          <div className="mt-1">
-            [DEBUG4] primeiros 5 candles (index, date): {JSON.stringify(
-              (priceCandles ?? []).slice(0, 5).map((c, i) => ({ i, date: c.date })),
-            )}
-          </div>
-          <div className="mt-1">
-            [DEBUG5] candles nos índices 128-136 (à volta do 1º tick suspeito):{" "}
-            {JSON.stringify(
-              (priceCandles ?? []).slice(128, 137).map((c, i) => ({ index: 128 + i, date: c.date })),
-            )}
-          </div>
-          <div className="mt-1">
-            todos: {JSON.stringify(history.quarterly.map((q) => ({
-              y: q.year,
-              q: q.quarter,
-              ni: q.netIncome,
-              sh: q.sharesOutstanding,
-              eps: q.epsDiluted,
-            })))}
-          </div>
-        </div>
-      )}
-
       {!isLoading && chartData.length > 0 && (
         <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
           <div className="flex items-center gap-2">
@@ -1606,42 +1563,42 @@ function CombinedChart({
                       }}
                     >
                       {label && <div className="mb-1 font-medium">{label}</div>}
-                      {rows.map((p: any, i: number) => {
-                        const isPrice = p.name === "Cotação";
-                        const value = p.value as number;
-                        if (value == null) return null;
+                      <div className="flex flex-col gap-0.5">
+                        {rows.map((p: any, i: number) => {
+                          const isPrice = p.name === "Cotação";
+                          const value = p.value as number;
+                          if (value == null) return null;
 
-                        let displayLabel = p.name;
-                        let pct: number | null = null;
-                        if (isPrice) {
-                          const dateStr = String(p.payload?.date ?? "");
-                          const shortDate =
-                            dateStr.length === 10 ? `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}` : "";
-                          displayLabel = shortDate ? `Cotação (${shortDate})` : "Cotação";
-                          pct = priceBase ? ((value - priceBase) / priceBase) * 100 : null;
-                        } else {
-                          pct = indicatorPctFromStart.get(quarterKey) ?? null;
-                          displayLabel = COMBINED_INDICATOR_LABELS[indicator];
-                        }
-                        const formattedValue = isPrice ? fmtMoney(value, currency) : formatIndicatorValue(value);
-                        const pctColorClass = pct == null ? "" : pct >= 0 ? "text-success" : "text-destructive";
+                          let displayLabel = p.name;
+                          let pct: number | null = null;
+                          if (isPrice) {
+                            const dateStr = String(p.payload?.date ?? "");
+                            const shortDate =
+                              dateStr.length === 10 ? `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}` : "";
+                            displayLabel = shortDate ? `Cotação (${shortDate})` : "Cotação";
+                            pct = priceBase ? ((value - priceBase) / priceBase) * 100 : null;
+                          } else {
+                            pct = indicatorPctFromStart.get(quarterKey) ?? null;
+                            displayLabel = COMBINED_INDICATOR_LABELS[indicator];
+                          }
+                          const formattedValue = isPrice ? fmtMoney(value, currency) : formatIndicatorValue(value);
+                          const pctColorClass = pct == null ? "" : pct >= 0 ? "text-success" : "text-destructive";
 
-                        return (
-                          <div key={i} className="flex items-baseline justify-between gap-3">
-                            <span>{displayLabel}:</span>
-                            <span>
-                              {formattedValue}
+                          return (
+                            <div key={i} className="flex items-baseline justify-between gap-4">
+                              <span>
+                                {displayLabel}: {formattedValue}
+                              </span>
                               {pct != null && (
-                                <span className={pctColorClass}>
-                                  {" "}
-                                  ({pct >= 0 ? "+" : ""}
-                                  {pct.toFixed(1)}%)
+                                <span className={pctColorClass + " text-right tabular-nums"}>
+                                  {pct >= 0 ? "+" : ""}
+                                  {pct.toFixed(1)}%
                                 </span>
                               )}
-                            </span>
-                          </div>
-                        );
-                      })}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 }}
@@ -1685,13 +1642,6 @@ function CombinedChart({
           </ResponsiveContainer>
         )}
       </div>
-      <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-        Linha roxa: cotação ({currency}, eixo esquerdo, diária). Barras:{" "}
-        {COMBINED_INDICATOR_LABELS[indicator]} ({indicator === "peTTM" ? "x" : currency}, eixo
-        direito, trimestral). "Homólogo" compara o último trimestre com o mesmo trimestre do
-        ano anterior. Passa o rato sobre o gráfico para ver o valor e a variação % desde o
-        início do período.
-      </p>
     </Card>
   );
 }
