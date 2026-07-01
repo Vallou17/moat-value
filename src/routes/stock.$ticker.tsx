@@ -1581,35 +1581,69 @@ function CombinedChart({
               />
               <Tooltip
                 cursor={false}
-                contentStyle={{
-                  background: "var(--popover)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  fontSize: 12,
-                  color: "var(--popover-foreground)",
-                }}
-                labelStyle={{ color: "var(--popover-foreground)" }}
-                itemStyle={{ color: "var(--popover-foreground)" }}
-                labelFormatter={(_, payload) => {
-                  const key = String(payload?.[0]?.payload?.quarterKey ?? "");
-                  const [y, q] = key.split("-");
-                  return q && y ? `T${q} ${y}` : "";
-                }}
-                formatter={(value: number, name: string, item: any) => {
-                  if (name === "Cotação") {
-                    const dateStr = String(item?.payload?.date ?? "");
-                    // dateStr is "YYYY-MM-DD" — show as "DD/MM" to match the requested
-                    // "Cotação (ex. 23/10)" label style.
-                    const shortDate = dateStr.length === 10 ? `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}` : "";
-                    const pct = priceBase ? ((value - priceBase) / priceBase) * 100 : null;
-                    const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
-                    return [`${fmtMoney(value, currency)}${pctStr}`, shortDate ? `Cotação (${shortDate})` : "Cotação"];
-                  }
-                  if (value == null) return null;
-                  const key = String(item?.payload?.quarterKey ?? "");
-                  const pct = indicatorPctFromStart.get(key);
-                  const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
-                  return [`${formatIndicatorValue(value)}${pctStr}`, COMBINED_INDICATOR_LABELS[indicator]];
+                content={(props: any) => {
+                  const { active, payload } = props;
+                  if (!active || !payload || payload.length === 0) return null;
+
+                  const quarterKey = String(payload[0]?.payload?.quarterKey ?? "");
+                  const [qy, qq] = quarterKey.split("-");
+                  const label = qq && qy ? `T${qq} ${qy}` : "";
+
+                  // Same duplication guard as before, now inside a custom tooltip content
+                  // component instead of the `formatter` prop — the Bar (indicatorBarValue)
+                  // and the invisible Line (indicatorTooltipValue) share a display name and,
+                  // on a quarter's first trading day, the same non-null value; we keep only
+                  // the Line's row since it covers every day of the quarter.
+                  const rows = payload.filter((p: any) => p.dataKey !== "indicatorBarValue");
+
+                  return (
+                    <div
+                      className="rounded-lg border px-3 py-2 text-xs"
+                      style={{
+                        background: "var(--popover)",
+                        borderColor: "var(--border)",
+                        color: "var(--popover-foreground)",
+                      }}
+                    >
+                      {label && <div className="mb-1 font-medium">{label}</div>}
+                      {rows.map((p: any, i: number) => {
+                        const isPrice = p.name === "Cotação";
+                        const value = p.value as number;
+                        if (value == null) return null;
+
+                        let displayLabel = p.name;
+                        let pct: number | null = null;
+                        if (isPrice) {
+                          const dateStr = String(p.payload?.date ?? "");
+                          const shortDate =
+                            dateStr.length === 10 ? `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}` : "";
+                          displayLabel = shortDate ? `Cotação (${shortDate})` : "Cotação";
+                          pct = priceBase ? ((value - priceBase) / priceBase) * 100 : null;
+                        } else {
+                          pct = indicatorPctFromStart.get(quarterKey) ?? null;
+                          displayLabel = COMBINED_INDICATOR_LABELS[indicator];
+                        }
+                        const formattedValue = isPrice ? fmtMoney(value, currency) : formatIndicatorValue(value);
+                        const pctColorClass = pct == null ? "" : pct >= 0 ? "text-success" : "text-destructive";
+
+                        return (
+                          <div key={i} className="flex items-baseline justify-between gap-3">
+                            <span>{displayLabel}:</span>
+                            <span>
+                              {formattedValue}
+                              {pct != null && (
+                                <span className={pctColorClass}>
+                                  {" "}
+                                  ({pct >= 0 ? "+" : ""}
+                                  {pct.toFixed(1)}%)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
                 }}
               />
               <Line
