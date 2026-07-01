@@ -1201,7 +1201,14 @@ function CombinedChart({
       if (indicator === "peTTM") {
         const epsTtm = epsTtmEndingAt(year, quarter);
         const endPrice = priceCandles ? closePriceAtQuarterEnd(priceCandles, year, quarter) : null;
-        out.set(key, epsTtm != null && epsTtm > 0 && endPrice != null ? endPrice / epsTtm : null);
+        // A negative TTM EPS makes P/E mathematically meaningless (a negative P/E implies
+        // the stock is "cheap" relative to a loss, which isn't a real valuation signal) —
+        // Macrotrends' convention for this case is to show 0 rather than omit the point or
+        // show a negative multiple, so we mirror that here for consistency.
+        out.set(
+          key,
+          epsTtm != null && endPrice != null ? (epsTtm > 0 ? endPrice / epsTtm : 0) : null,
+        );
       } else if (indicator === "epsDiluted") {
         out.set(key, q?.epsDiluted ?? null);
       } else {
@@ -1271,11 +1278,19 @@ function CombinedChart({
       const key = `${c.date.slice(0, 4)}-${quarterOfDate(c.date)}`;
       lastDayOfQuarter.set(key, c.date); // candles are chronological, so this ends up as the last one
     }
-    return priceCandles.map((c) => {
+    return priceCandles.map((c, i) => {
       const key = `${c.date.slice(0, 4)}-${quarterOfDate(c.date)}`;
       const isQuarterEnd = lastDayOfQuarter.get(key) === c.date;
       return {
         date: c.date,
+        // Explicit sequential index — used as the tick anchor below instead of the raw
+        // date string. With ~2500 daily points on a category axis but only ~10 year
+        // ticks, Recharts can round a tick's requested position to a neighboring data
+        // point when positioning by string/category value, which was causing the "2024"
+        // label to visually land under a late-2023 bar instead of the actual first
+        // trading day of 2024. Indexing removes that ambiguity: each point has one exact,
+        // unique position.
+        index: i,
         price: c.close,
         // Only set on the quarter's last trading day, so the <Bar> renders one bar per
         // quarter instead of a bar repeated across every day.
@@ -1303,21 +1318,31 @@ function CombinedChart({
     return out;
   }, [quartersInRange, indicatorByQuarter]);
 
-  // One tick per calendar year, instead of letting Recharts auto-space ticks by pixel
-  // density (which was placing 2+ ticks inside the same year and repeating year labels).
+  // One tick per calendar year, positioned at the exact chart-data INDEX of that year's
+  // first trading day — not the date string itself, since Recharts can round a
+  // string/category-positioned tick to a neighboring data point on a dense daily axis.
   const xTicks = useMemo(() => {
     if (!priceCandles || priceCandles.length === 0) return [];
     const seen = new Set<string>();
-    const ticks: string[] = [];
-    for (const c of priceCandles) {
+    const ticks: number[] = [];
+    priceCandles.forEach((c, i) => {
       const y = c.date.slice(0, 4);
       if (!seen.has(y)) {
         seen.add(y);
-        ticks.push(c.date);
+        ticks.push(i);
       }
-    }
+    });
     return ticks;
   }, [priceCandles]);
+
+  // date string for a given chart-data index — used by the axis tick formatter, since the
+  // axis itself now plots by index but the label shown to the user should still read the
+  // year from the underlying date.
+  const yearAtIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    chartData.forEach((d) => map.set(d.index, d.date.slice(0, 4)));
+    return map;
+  }, [chartData]);
 
   function formatIndicatorValue(v: number): string {
     if (indicator === "peTTM") return `${v.toFixed(1)}x`;
@@ -1434,9 +1459,11 @@ function CombinedChart({
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis
-                dataKey="date"
+                dataKey="index"
+                type="number"
+                domain={["dataMin", "dataMax"]}
                 tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                tickFormatter={(d) => String(d).slice(0, 4)}
+                tickFormatter={(i) => yearAtIndex.get(Number(i)) ?? ""}
                 ticks={xTicks}
                 tickLine={false}
                 minTickGap={20}
@@ -1472,7 +1499,7 @@ function CombinedChart({
                 }}
                 labelStyle={{ color: "var(--popover-foreground)" }}
                 itemStyle={{ color: "var(--popover-foreground)" }}
-                labelFormatter={(d) => String(d)}
+                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.date ?? "")}
                 formatter={(value: number, name: string, item: any) => {
                   if (name === "Cotação") {
                     const pct = priceBase ? ((value - priceBase) / priceBase) * 100 : null;
