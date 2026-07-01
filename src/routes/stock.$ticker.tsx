@@ -1083,10 +1083,15 @@ function CombinedChart({
   }, [quarterlyByKey]);
 
   // "Implied" diluted share count for a quarter: netIncome ÷ that same quarter's reported
-  // EPS. Because both numbers come from the same filing, this is always on the correct,
-  // current share basis — unlike a raw shares-outstanding fact, which can be stale or, more
-  // importantly, can straddle a stock split (Amazon's 20-for-1 split in June 2022, and
-  // Netflix's 10-for-1 split, are both confirmed real-world cases in our EDGAR data).
+  // EPS. Because both numbers come from the same filing, this is always on the correct
+  // share basis FOR THAT FILING — but "correct for that filing" is not the same as
+  // "correct for this chart". Twelve Data (our price source) reports historical prices
+  // split-adjusted to the CURRENT share count, the same way every price provider does. SEC
+  // EDGAR's per-filing EPS facts are NOT retroactively adjusted the same way — a 2019 10-Q
+  // reports EPS on 2019's actual share count, not today's. Dividing a split-adjusted price
+  // by a not-split-adjusted EPS silently produces a P/E that's wrong by the split ratio for
+  // every quarter before the split (confirmed against Macrotrends: our pre-2022 P/E was
+  // landing ~20x too low, matching Amazon's June-2022 20-for-1 split exactly).
   const impliedSharesByQuarter = useMemo(() => {
     const raw = new Map<string, number>();
     for (const [key, q] of quarterlyByKey) {
@@ -1095,42 +1100,49 @@ function CombinedChart({
         if (implied > 0) raw.set(key, implied);
       }
     }
-    if (raw.size < 3) return raw;
+    if (raw.size < 2) return raw;
 
-    // Sort chronologically (not by value) — a stock split shows up as an abrupt jump
-    // between two chronologically ADJACENT quarters, e.g. Amazon's June 2022 20-for-1
-    // split moves implied shares from ~500M to ~10.2B between two consecutive quarters.
-    // A single GLOBAL median across the whole history is the wrong tool for this: once a
-    // split has happened, pre- and post-split quarters form two same-order-of-magnitude
-    // populations, so whichever population happens to have MORE quarters in the cached
-    // history "wins" the median, and the entire other population — including current,
-    // correct, recent quarters — gets rejected as "outliers". That is exactly what
-    // happened here: 15 years of pre-split Amazon quarters outnumbered ~5 years of
-    // post-split ones, so the median landed pre-split and every post-2022 quarter (i.e.
-    // every quarter actually needed for a *current* P/E) was discarded, forcing the
-    // nearest-quarter lookup all the way back to 2021 for a share count ~20x too small.
-    //
-    // Instead, compare each quarter to a LOCAL median from its nearby neighbors (a small
-    // rolling window) — this stays correct across a split because within a short window
-    // on either side of the split date, all quarters share the same basis; only the pair
-    // of quarters straddling the split itself will disagree, and by then we've already
-    // established which side is "local" for every other point.
     const sortedKeys = Array.from(raw.keys()).sort((a, b) => {
       const [ay, aq] = a.split("-").map(Number);
       const [by, bq] = b.split("-").map(Number);
       return ay !== by ? ay - by : aq - bq;
     });
-    const WINDOW = 4; // quarters on each side — enough to be robust, small enough to stay local across a nearby split
-    const out = new Map<string, number>();
-    for (let i = 0; i < sortedKeys.length; i++) {
+
+    // Detect split boundaries: an abrupt jump in implied-shares between two
+    // chronologically ADJACENT quarters (a real quarter-to-quarter change in share count
+    // is gradual — a few % from buybacks/issuance — so a jump of 3x or more is a split,
+    // not organic growth). We walk newest-to-oldest, since the chart's price series is
+    // split-adjusted to the CURRENT basis, so the most recent quarters are already on the
+    // basis we want everything expressed in.
+    const cumulativeFactor = new Map<string, number>(); // key -> multiplier to bring it to current basis
+    let factor = 1;
+    for (let i = sortedKeys.length - 1; i >= 0; i--) {
       const key = sortedKeys[i];
-      const val = raw.get(key)!;
-      const windowVals = sortedKeys
-        .slice(Math.max(0, i - WINDOW), Math.min(sortedKeys.length, i + WINDOW + 1))
-        .map((k) => raw.get(k)!)
-        .sort((a, b) => a - b);
-      const localMedian = windowVals[Math.floor(windowVals.length / 2)];
-      if (val > localMedian / 3 && val < localMedian * 3) out.set(key, val);
+      cumulativeFactor.set(key, factor);
+      if (i > 0) {
+        const prevKey = sortedKeys[i - 1];
+        const curVal = raw.get(key)!;
+        const prevVal = raw.get(prevKey)!;
+        const ratio = curVal / prevVal;
+        // A split going backward in time looks like a DROP in implied shares (older
+        // quarter has fewer, pre-split shares) — i.e. prevVal is smaller than curVal by
+        // roughly a whole-number ratio. Round to the nearest whole number since real
+        // splits are clean ratios (2-for-1, 3-for-1, 20-for-1, etc.) — this also guards
+        // against a single noisy/misreported quarter being mistaken for a split, since a
+        // genuine split ratio rounds cleanly while noise generally won't land near an
+        // integer.
+        if (ratio > 1.5) {
+          const rounded = Math.round(ratio);
+          if (Math.abs(ratio - rounded) < 0.15 && rounded >= 2) {
+            factor *= rounded;
+          }
+        }
+      }
+    }
+
+    const out = new Map<string, number>();
+    for (const [key, val] of raw) {
+      out.set(key, val * (cumulativeFactor.get(key) ?? 1));
     }
     return out;
   }, [quarterlyByKey]);
@@ -1140,35 +1152,19 @@ function CombinedChart({
   // Trailing-twelve-months EPS ending in a given quarter, ALWAYS via trailing net income ÷
   // implied share count from the nearest reliable quarter. We previously also tried summing
   // 4 isolated diluted-EPS facts directly whenever all 4 were present, on the assumption that
-  // "the filer reported it, so it's correct". In practice that path was what let Netflix's
-  // P/E TTM come out far too low: at least one of those 4 isolated EPS facts was not
-  // split-adjusted, and summing doesn't catch that the way the median-based outlier filter
-  // on *implied shares* does. Net income is never affected by a split, so routing everything
-  // through net-income ÷ implied-shares removes that entire failure mode — at the cost of
-  // being a slightly different methodology than a raw EPS sum, but a consistent and
-  // split-safe one.
-  //
-  // A second failure mode remains even after fixing the outlier filter: a TTM window can
-  // straddle a split date itself (e.g. a window covering Q3 2021 through Q2 2022 spans
-  // Amazon's June-2022 20-for-1 split), or a quarter can be missing an isolated EPS fact
-  // (common for Q4, often only ever reported inside the annual 10-K). In both cases,
-  // `nearestImpliedShares` will still find SOME value if we let it search arbitrarily far,
-  // but that value may belong to a different share-count basis than the quarter it's being
-  // applied to — producing a P/E that's numerically valid-looking but meaningless. Rather
-  // than guess, we require the implied-shares figure to come from within 2 quarters of the
-  // one we're computing, and to be consistent (same order of magnitude) with whichever
-  // neighboring quarters in the window DO have their own implied-shares figure. If no
-  // sufficiently close, consistent basis exists, we return null — the chart should show a
-  // gap for that quarter rather than a misleading bar.
-  const MAX_SHARES_LOOKUP_DISTANCE = 2;
-  function nearbyConsistentImpliedShares(key: string): number | null {
+  // Since impliedSharesByQuarter above already normalizes every quarter to the SAME
+  // (current) share basis, a simple nearest-quarter lookup is safe again — there's no
+  // longer a risk of accidentally borrowing a share count from "the other side" of a
+  // split, because there IS no other side anymore; everything has already been rescaled.
+  function nearestImpliedShares(key: string): number | null {
     const idx = sortedQuarterKeys.indexOf(key);
     if (idx === -1) return null;
-    for (let dist = 0; dist <= MAX_SHARES_LOOKUP_DISTANCE; dist++) {
+    for (let dist = 0; dist < sortedQuarterKeys.length; dist++) {
       const before = sortedQuarterKeys[idx - dist];
       const after = sortedQuarterKeys[idx + dist];
       if (before != null && impliedSharesByQuarter.has(before)) return impliedSharesByQuarter.get(before)!;
       if (after != null && impliedSharesByQuarter.has(after)) return impliedSharesByQuarter.get(after)!;
+      if (before == null && after == null) break;
     }
     return null;
   }
@@ -1192,19 +1188,8 @@ function CombinedChart({
       if (ni == null) return null;
       netIncomeSum += ni;
     }
-    const shares = nearbyConsistentImpliedShares(quarterKeys[0]);
+    const shares = nearestImpliedShares(quarterKeys[0]);
     if (shares == null || shares <= 0) return null;
-
-    // Guard against the window straddling a split: if any OTHER quarter in this same
-    // 4-quarter TTM window has its own directly-known implied-shares figure, it must be
-    // on the same basis (within the same ~3x band) as the one we're about to apply to the
-    // whole window. A quarter early in the window disagreeing by an order of magnitude is
-    // the signature of a split having occurred partway through — in that case there is no
-    // single share count that correctly applies to the whole window, so we bail out.
-    for (const k of quarterKeys) {
-      const direct = impliedSharesByQuarter.get(k);
-      if (direct != null && (direct < shares / 3 || direct > shares * 3)) return null;
-    }
 
     return netIncomeSum / shares;
   }
