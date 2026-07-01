@@ -1464,7 +1464,7 @@ function CombinedChart({
         <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">
-              Variação da Cotação <strong className="font-semibold text-foreground">desde início da série / no último ano</strong>
+              Variação da Cotação <strong className="font-semibold text-foreground">desde início da série / no último ano:</strong>
             </span>
             <span className="font-medium">
               <PctBadge pct={priceFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
@@ -1474,7 +1474,7 @@ function CombinedChart({
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">
               Variação {COMBINED_INDICATOR_LABELS[indicator]}{" "}
-              <strong className="font-semibold text-foreground">desde início da série / no último ano</strong>
+              <strong className="font-semibold text-foreground">desde início da série / no último ano:</strong>
             </span>
             <span className="font-medium">
               <PctBadge pct={indicatorFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
