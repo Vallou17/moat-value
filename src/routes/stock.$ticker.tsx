@@ -1344,6 +1344,28 @@ function CombinedChart({
     });
   }, [priceCandles, indicatorByQuarter]);
 
+  // Maps each quarter to the chart-data index its bar is drawn at (the quarter's first
+  // trading day) — used to translate "which day is the cursor over" into "which bar
+  // should highlight", since the bar itself only exists at one index per quarter but the
+  // cursor can be hovering over any of that quarter's ~60 daily points.
+  const barIndexByQuarterKey = useMemo(() => {
+    const map = new Map<string, number>();
+    chartData.forEach((d, i) => {
+      if (!map.has(d.quarterKey)) map.set(d.quarterKey, i);
+    });
+    return map;
+  }, [chartData]);
+
+  // The bar-highlight index to actually use — the requested `activeIndex` translated to
+  // whichever chart-data index that quarter's bar lives at, so hovering ANY day within a
+  // quarter highlights that quarter's bar, not just the one exact day the bar is drawn on.
+  const activeBarIndex = useMemo(() => {
+    if (activeIndex == null) return null;
+    const key = chartData[activeIndex]?.quarterKey;
+    if (key == null) return null;
+    return barIndexByQuarterKey.get(key) ?? null;
+  }, [activeIndex, chartData, barIndexByQuarterKey]);
+
   // % change of the indicator from the first quarter with data to each subsequent quarter —
   // shown in the tooltip alongside the absolute value.
   const indicatorPctFromStart = useMemo(() => {
@@ -1527,7 +1549,10 @@ function CombinedChart({
               <XAxis
                 dataKey="index"
                 type="number"
-                domain={["dataMin", "dataMax"]}
+                domain={([min, max]: [number, number]) => {
+                  const pad = (max - min) * 0.015;
+                  return [min - pad, max + pad];
+                }}
                 tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                 tickFormatter={(i) => yearAtIndex.get(Number(i)) ?? ""}
                 ticks={xTicks}
@@ -1565,12 +1590,20 @@ function CombinedChart({
                 }}
                 labelStyle={{ color: "var(--popover-foreground)" }}
                 itemStyle={{ color: "var(--popover-foreground)" }}
-                labelFormatter={(_, payload) => String(payload?.[0]?.payload?.date ?? "")}
+                labelFormatter={(_, payload) => {
+                  const key = String(payload?.[0]?.payload?.quarterKey ?? "");
+                  const [y, q] = key.split("-");
+                  return q && y ? `T${q} ${y}` : "";
+                }}
                 formatter={(value: number, name: string, item: any) => {
                   if (name === "Cotação") {
+                    const dateStr = String(item?.payload?.date ?? "");
+                    // dateStr is "YYYY-MM-DD" — show as "DD/MM" to match the requested
+                    // "Cotação (ex. 23/10)" label style.
+                    const shortDate = dateStr.length === 10 ? `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}` : "";
                     const pct = priceBase ? ((value - priceBase) / priceBase) * 100 : null;
                     const pctStr = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : "";
-                    return [`${fmtMoney(value, currency)}${pctStr}`, name];
+                    return [`${fmtMoney(value, currency)}${pctStr}`, shortDate ? `Cotação (${shortDate})` : "Cotação"];
                   }
                   if (value == null) return null;
                   const key = String(item?.payload?.quarterKey ?? "");
@@ -1579,16 +1612,26 @@ function CombinedChart({
                   return [`${formatIndicatorValue(value)}${pctStr}`, COMBINED_INDICATOR_LABELS[indicator]];
                 }}
               />
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="price"
+                name="Cotação"
+                stroke="#F2C744"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
               <Bar
                 yAxisId="indicator"
                 dataKey="indicatorBarValue"
                 name={COMBINED_INDICATOR_LABELS[indicator]}
                 legendType="none"
                 isAnimationActive={false}
-                shape={makeHighlightBar(activeIndex, gradientId, 18) as any}
+                shape={makeHighlightBar(activeBarIndex, gradientId, 18) as any}
               />
               {/* Invisible line carrying the indicator's value on every day of its quarter
-                  (not just the quarter's last day, where the bar itself sits) — this is
+                  (not just the quarter's first day, where the bar itself sits) — this is
                   what lets the tooltip show the indicator's value/variation no matter which
                   day within that quarter the user is hovering over. */}
               <Line
@@ -1602,16 +1645,6 @@ function CombinedChart({
                 activeDot={false}
                 legendType="none"
                 connectNulls
-                isAnimationActive={false}
-              />
-              <Line
-                yAxisId="price"
-                type="monotone"
-                dataKey="price"
-                name="Cotação"
-                stroke="#F2C744"
-                strokeWidth={2}
-                dot={false}
                 isAnimationActive={false}
               />
             </ComposedChart>
