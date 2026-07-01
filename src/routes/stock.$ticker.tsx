@@ -1413,6 +1413,13 @@ function CombinedChart({
             {history.quarterly.filter((q) => q.epsDiluted != null).length}
           </div>
           <div className="mt-1">
+            [DEBUG2] priceQuery.data.length: {priceQuery.data?.length ?? "undefined"} | priceCandles.length (pós-corte):{" "}
+            {priceCandles?.length ?? "undefined"} | primeiro candle bruto:{" "}
+            {priceQuery.data?.[0]?.date ?? "?"} | primeiro candle cortado: {priceCandles?.[0]?.date ?? "?"} | primeiro
+            trimestre history: {history.quarterly[0]?.year}-{history.quarterly[0]?.quarter} | xTicks:{" "}
+            {JSON.stringify(xTicks)}
+          </div>
+          <div className="mt-1">
             todos: {JSON.stringify(history.quarterly.map((q) => ({
               y: q.year,
               q: q.quarter,
@@ -1427,7 +1434,9 @@ function CombinedChart({
       {!isLoading && chartData.length > 0 && (
         <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Variação da Cotação desde início da série / no último ano</span>
+            <span className="text-muted-foreground">
+              Variação da Cotação <strong className="font-semibold text-foreground">desde início da série / no último ano</strong>
+            </span>
             <span className="font-medium">
               <PctBadge pct={priceFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
               <PctBadge pct={priceYoy} />
@@ -1435,7 +1444,8 @@ function CombinedChart({
           </div>
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground">
-              Variação {COMBINED_INDICATOR_LABELS[indicator]} desde início da série / no último ano
+              Variação {COMBINED_INDICATOR_LABELS[indicator]}{" "}
+              <strong className="font-semibold text-foreground">desde início da série / no último ano</strong>
             </span>
             <span className="font-medium">
               <PctBadge pct={indicatorFullPeriodPct} /> <span className="text-muted-foreground">/</span>{" "}
