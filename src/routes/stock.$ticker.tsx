@@ -1446,6 +1446,26 @@ function CombinedChart({
         </div>
       </div>
 
+      {/* TEMPORARY DIAGNOSTIC — remove once NFLX Nov-2025 split detection is confirmed working. */}
+      {history?.quarterly && (
+        <div className="mb-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[11px] font-mono">
+          <div>
+            [DEBUG] todos: {JSON.stringify(
+              history.quarterly.map((q) => ({
+                y: q.year,
+                q: q.quarter,
+                ni: q.netIncome,
+                eps: q.epsDiluted,
+                implied: q.netIncome != null && q.epsDiluted ? Math.round(q.netIncome / q.epsDiluted) : null,
+                normalized: impliedSharesByQuarter.get(`${q.year}-${q.quarter}`)
+                  ? Math.round(impliedSharesByQuarter.get(`${q.year}-${q.quarter}`)!)
+                  : null,
+              })),
+            )}
+          </div>
+        </div>
+      )}
+
       {!isLoading && chartData.length > 0 && (
         <div className="mb-4 grid grid-cols-1 gap-2 rounded-lg border border-border/60 bg-card/40 p-3 text-xs sm:grid-cols-2">
           <div className="flex items-center gap-2">
