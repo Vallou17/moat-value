@@ -1304,17 +1304,24 @@ function CombinedChart({
   }, [quartersInRange, indicatorByQuarter]);
 
   // One row per trading day: price as a continuous absolute line, indicator held at its
-  // quarter's value only on the last trading day of that quarter (rendered as bars).
+  // quarter's value on the FIRST trading day of that quarter (rendered as bars). We use
+  // the first day rather than the last so each bar visually lines up with the start of
+  // the period it represents — with the last day, a Q1 bar landed near end-of-March,
+  // which read as the whole chart being shifted about a quarter to the right relative to
+  // the year tick marks (which sit at each year's first trading day). The underlying P/E
+  // TTM value itself is unaffected either way — it's always computed from the trailing 4
+  // quarters ending in that quarter, regardless of which day of the quarter the bar is
+  // drawn on.
   const chartData = useMemo(() => {
     if (!priceCandles || priceCandles.length === 0) return [];
-    const lastDayOfQuarter = new Map<string, string>();
+    const firstDayOfQuarter = new Map<string, string>();
     for (const c of priceCandles) {
       const key = `${c.date.slice(0, 4)}-${quarterOfDate(c.date)}`;
-      lastDayOfQuarter.set(key, c.date); // candles are chronological, so this ends up as the last one
+      if (!firstDayOfQuarter.has(key)) firstDayOfQuarter.set(key, c.date); // candles are chronological, so this only sets on the first occurrence
     }
     return priceCandles.map((c, i) => {
       const key = `${c.date.slice(0, 4)}-${quarterOfDate(c.date)}`;
-      const isQuarterEnd = lastDayOfQuarter.get(key) === c.date;
+      const isQuarterStart = firstDayOfQuarter.get(key) === c.date;
       return {
         date: c.date,
         // Explicit sequential index — used as the tick anchor below instead of the raw
@@ -1326,11 +1333,11 @@ function CombinedChart({
         // unique position.
         index: i,
         price: c.close,
-        // Only set on the quarter's last trading day, so the <Bar> renders one bar per
+        // Only set on the quarter's first trading day, so the <Bar> renders one bar per
         // quarter instead of a bar repeated across every day.
-        indicatorBarValue: isQuarterEnd ? indicatorByQuarter.get(key) ?? null : null,
+        indicatorBarValue: isQuarterStart ? indicatorByQuarter.get(key) ?? null : null,
         // Set on every day of the quarter, so hovering anywhere in that quarter (not just
-        // its last day) still shows the indicator's value and % change in the tooltip.
+        // its first day) still shows the indicator's value and % change in the tooltip.
         indicatorTooltipValue: indicatorByQuarter.get(key) ?? null,
         quarterKey: key,
       };
