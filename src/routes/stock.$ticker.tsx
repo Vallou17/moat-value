@@ -1085,8 +1085,8 @@ function CombinedChart({
   // "Implied" diluted share count for a quarter: netIncome ÷ that same quarter's reported
   // EPS. Because both numbers come from the same filing, this is always on the correct,
   // current share basis — unlike a raw shares-outstanding fact, which can be stale or, more
-  // importantly, can straddle a stock split (Netflix did a 10-for-1 split, for example,
-  // which would otherwise silently inflate P/E by ~10x for periods reported pre-split).
+  // importantly, can straddle a stock split (Amazon's 20-for-1 split in June 2022, and
+  // Netflix's 10-for-1 split, are both confirmed real-world cases in our EDGAR data).
   const impliedSharesByQuarter = useMemo(() => {
     const raw = new Map<string, number>();
     for (const [key, q] of quarterlyByKey) {
@@ -1095,19 +1095,42 @@ function CombinedChart({
         if (implied > 0) raw.set(key, implied);
       }
     }
-    // A stock split changes EPS and share count but NOT net income — if a filer's EDGAR
-    // history has even one quarter where the isolated EPS fact wasn't restated for a later
-    // split (this happens in practice; confirmed for Netflix's 10-for-1 split), that single
-    // quarter's implied share count comes out ~10x off from every other quarter's, which
-    // would otherwise corrupt the "nearest available" lookup used for filling P/E gaps.
-    // We filter those out via a simple median-based outlier check rather than trying to
-    // detect the exact split date and ratio, which EDGAR doesn't cleanly expose.
-    const values = Array.from(raw.values()).sort((a, b) => a - b);
-    if (values.length < 3) return raw;
-    const median = values[Math.floor(values.length / 2)];
+    if (raw.size < 3) return raw;
+
+    // Sort chronologically (not by value) — a stock split shows up as an abrupt jump
+    // between two chronologically ADJACENT quarters, e.g. Amazon's June 2022 20-for-1
+    // split moves implied shares from ~500M to ~10.2B between two consecutive quarters.
+    // A single GLOBAL median across the whole history is the wrong tool for this: once a
+    // split has happened, pre- and post-split quarters form two same-order-of-magnitude
+    // populations, so whichever population happens to have MORE quarters in the cached
+    // history "wins" the median, and the entire other population — including current,
+    // correct, recent quarters — gets rejected as "outliers". That is exactly what
+    // happened here: 15 years of pre-split Amazon quarters outnumbered ~5 years of
+    // post-split ones, so the median landed pre-split and every post-2022 quarter (i.e.
+    // every quarter actually needed for a *current* P/E) was discarded, forcing the
+    // nearest-quarter lookup all the way back to 2021 for a share count ~20x too small.
+    //
+    // Instead, compare each quarter to a LOCAL median from its nearby neighbors (a small
+    // rolling window) — this stays correct across a split because within a short window
+    // on either side of the split date, all quarters share the same basis; only the pair
+    // of quarters straddling the split itself will disagree, and by then we've already
+    // established which side is "local" for every other point.
+    const sortedKeys = Array.from(raw.keys()).sort((a, b) => {
+      const [ay, aq] = a.split("-").map(Number);
+      const [by, bq] = b.split("-").map(Number);
+      return ay !== by ? ay - by : aq - bq;
+    });
+    const WINDOW = 4; // quarters on each side — enough to be robust, small enough to stay local across a nearby split
     const out = new Map<string, number>();
-    for (const [key, val] of raw) {
-      if (val > median / 3 && val < median * 3) out.set(key, val);
+    for (let i = 0; i < sortedKeys.length; i++) {
+      const key = sortedKeys[i];
+      const val = raw.get(key)!;
+      const windowVals = sortedKeys
+        .slice(Math.max(0, i - WINDOW), Math.min(sortedKeys.length, i + WINDOW + 1))
+        .map((k) => raw.get(k)!)
+        .sort((a, b) => a - b);
+      const localMedian = windowVals[Math.floor(windowVals.length / 2)];
+      if (val > localMedian / 3 && val < localMedian * 3) out.set(key, val);
     }
     return out;
   }, [quarterlyByKey]);
