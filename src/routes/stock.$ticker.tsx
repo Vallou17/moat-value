@@ -1041,11 +1041,25 @@ function CombinedChart({
     const quarterly = history?.quarterly;
     if (!quarterly || quarterly.length === 0) return all;
     const sorted = quarterly.slice().sort((a, b) => (a.year !== b.year ? a.year - b.year : a.quarter - b.quarter));
-    const first = sorted[0];
+    const earliest = sorted[0];
+    // A trailing-twelve-months figure needs 4 full quarters of history before it, so the
+    // first quarter that can actually produce a TTM bar is 3 quarters AFTER the earliest
+    // quarter with any data at all — not the earliest quarter itself. Trimming to the
+    // earliest available quarter (as before) left ~3 quarters of price-only lead-in with
+    // no bar possible for any indicator that depends on a trailing window, which read as
+    // a "missing" or "misaligned" start of the chart even though nothing was actually
+    // wrong — there just wasn't enough history yet to compute anything there.
+    let y = earliest.year;
+    let q = earliest.quarter + 3;
+    while (q > 4) {
+      q -= 4;
+      y += 1;
+    }
+    const first = { year: y, quarter: q };
     const cutoffIndex = all.findIndex((c) => {
-      const y = Number(c.date.slice(0, 4));
-      const q = quarterOfDate(c.date);
-      return y > first.year || (y === first.year && q >= first.quarter);
+      const cy = Number(c.date.slice(0, 4));
+      const cq = quarterOfDate(c.date);
+      return cy > first.year || (cy === first.year && cq >= first.quarter);
     });
     return cutoffIndex === -1 ? all : all.slice(cutoffIndex);
   }, [priceQuery.data, history]);
@@ -1374,7 +1388,7 @@ function CombinedChart({
     if (pct == null) return <span className="text-muted-foreground">—</span>;
     const up = pct >= 0;
     return (
-      <span className={up ? "text-success" : "text-destructive"}>
+      <span className={"font-semibold " + (up ? "text-success" : "text-destructive")}>
         {up ? "+" : ""}
         {pct.toFixed(1)}%
       </span>
@@ -1418,6 +1432,21 @@ function CombinedChart({
             {priceQuery.data?.[0]?.date ?? "?"} | primeiro candle cortado: {priceCandles?.[0]?.date ?? "?"} | primeiro
             trimestre history: {history.quarterly[0]?.year}-{history.quarterly[0]?.quarter} | xTicks:{" "}
             {JSON.stringify(xTicks)}
+          </div>
+          <div className="mt-1">
+            [DEBUG3] datas nos índices de xTicks:{" "}
+            {JSON.stringify(xTicks.map((i) => ({ index: i, date: priceCandles?.[i]?.date ?? null })))}
+          </div>
+          <div className="mt-1">
+            [DEBUG4] primeiros 5 candles (index, date): {JSON.stringify(
+              (priceCandles ?? []).slice(0, 5).map((c, i) => ({ i, date: c.date })),
+            )}
+          </div>
+          <div className="mt-1">
+            [DEBUG5] candles nos índices 128-136 (à volta do 1º tick suspeito):{" "}
+            {JSON.stringify(
+              (priceCandles ?? []).slice(128, 137).map((c, i) => ({ index: 128 + i, date: c.date })),
+            )}
           </div>
           <div className="mt-1">
             todos: {JSON.stringify(history.quarterly.map((q) => ({
