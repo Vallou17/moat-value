@@ -1142,41 +1142,48 @@ function CombinedChart({
       return ay !== by ? ay - by : aq - bq;
     });
 
-    // Detect split boundaries: an abrupt jump in implied-shares between two
-    // chronologically ADJACENT quarters (a real quarter-to-quarter change in share count
-    // is gradual — a few % from buybacks/issuance — so a jump of 3x or more is a split,
-    // not organic growth). We walk newest-to-oldest, since the chart's price series is
-    // split-adjusted to the CURRENT basis, so the most recent quarters are already on the
-    // basis we want everything expressed in.
-    const cumulativeFactor = new Map<string, number>(); // key -> multiplier to bring it to current basis
-    let factor = 1;
-    for (let i = sortedKeys.length - 1; i >= 0; i--) {
-      const key = sortedKeys[i];
-      cumulativeFactor.set(key, factor);
-      if (i > 0) {
-        const prevKey = sortedKeys[i - 1];
-        const curVal = raw.get(key)!;
-        const prevVal = raw.get(prevKey)!;
-        const ratio = curVal / prevVal;
-        // A split going backward in time looks like a DROP in implied shares (older
-        // quarter has fewer, pre-split shares) — i.e. prevVal is smaller than curVal by
-        // roughly a whole-number ratio. Round to the nearest whole number since real
-        // splits are clean ratios (2-for-1, 3-for-1, 20-for-1, etc.) — this also guards
-        // against a single noisy/misreported quarter being mistaken for a split, since a
-        // genuine split ratio rounds cleanly while noise generally won't land near an
-        // integer.
-        if (ratio > 1.5) {
-          const rounded = Math.round(ratio);
-          if (Math.abs(ratio - rounded) < 0.15 && rounded >= 2) {
-            factor *= rounded;
-          }
-        }
-      }
-    }
-
+    // Rescale every quarter to a common share-count basis by comparing it to the median
+    // of its own local neighborhood (a small window of nearby quarters), rather than
+    // walking the series pairwise and propagating any detected jump indefinitely.
+    //
+    // We tried the pairwise/propagating approach first and it failed on Netflix: a single
+    // quarter (2025-Q1) had a mis-tagged EPS fact that was ~10x too small relative to
+    // BOTH the quarter before and the quarter after it — not a real split (Netflix's
+    // actual split didn't happen until Nov 2025). A pairwise walk sees "2024-Q3 -> 2025-Q1
+    // jumped 10x" and, seeing no later reversal in its own immediate check, wrongly
+    // treats it as a permanent split and rescales the ENTIRE earlier history by 10x.
+    //
+    // A local-median comparison sidesteps this: an isolated bad quarter disagrees with
+    // its neighbors on both sides, so it gets individually corrected without dragging the
+    // rest of the series along. A genuine, permanent split still works correctly, because
+    // every quarter on the "old" side of the split shares a consistent local median with
+    // its own neighbors (all pre-split), and every quarter on the "new" side does too (all
+    // post-split) — only the pair of quarters immediately straddling the split itself sees
+    // a real local disagreement, exactly where we want one.
+    const WINDOW = 3; // quarters on each side of the point being evaluated
     const out = new Map<string, number>();
-    for (const [key, val] of raw) {
-      out.set(key, val * (cumulativeFactor.get(key) ?? 1));
+    for (let i = 0; i < sortedKeys.length; i++) {
+      const key = sortedKeys[i];
+      const val = raw.get(key)!;
+      const windowVals = sortedKeys
+        .slice(Math.max(0, i - WINDOW), Math.min(sortedKeys.length, i + WINDOW + 1))
+        .map((k) => raw.get(k)!)
+        .sort((a, b) => a - b);
+      const localMedian = windowVals[Math.floor(windowVals.length / 2)];
+      const ratio = localMedian / val;
+      // Snap to the nearest whole-number ratio (real splits/mis-tags are clean multiples —
+      // 2x, 10x, 20x, etc.) and only rescale if it's actually close to a whole number,
+      // guarding against genuine organic quarter-to-quarter variation being misread as a
+      // basis mismatch.
+      if (ratio > 1.5) {
+        const rounded = Math.round(ratio);
+        out.set(key, Math.abs(ratio - rounded) < 0.15 ? val * rounded : val);
+      } else if (ratio < 1 / 1.5) {
+        const rounded = Math.round(1 / ratio);
+        out.set(key, Math.abs(1 / ratio - rounded) < 0.15 ? val / rounded : val);
+      } else {
+        out.set(key, val);
+      }
     }
     return out;
   }, [quarterlyByKey]);
@@ -1451,16 +1458,22 @@ function CombinedChart({
         <div className="mb-3 rounded-md border border-dashed border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[11px] font-mono">
           <div>
             [DEBUG] todos: {JSON.stringify(
-              history.quarterly.map((q) => ({
-                y: q.year,
-                q: q.quarter,
-                ni: q.netIncome,
-                eps: q.epsDiluted,
-                implied: q.netIncome != null && q.epsDiluted ? Math.round(q.netIncome / q.epsDiluted) : null,
-                normalized: impliedSharesByQuarter.get(`${q.year}-${q.quarter}`)
-                  ? Math.round(impliedSharesByQuarter.get(`${q.year}-${q.quarter}`)!)
-                  : null,
-              })),
+              history.quarterly.map((q) => {
+                const key = `${q.year}-${q.quarter}`;
+                const eps = epsTtmEndingAt(q.year, q.quarter);
+                const price = priceCandles ? closePriceAtQuarterEnd(priceCandles, q.year, q.quarter) : null;
+                return {
+                  y: q.year,
+                  q: q.quarter,
+                  ni: q.netIncome,
+                  eps: q.epsDiluted,
+                  implied: q.netIncome != null && q.epsDiluted ? Math.round(q.netIncome / q.epsDiluted) : null,
+                  normalized: impliedSharesByQuarter.get(key) ? Math.round(impliedSharesByQuarter.get(key)!) : null,
+                  epsTtm: eps != null ? Number(eps.toFixed(2)) : null,
+                  price,
+                  peTtm: eps != null && eps > 0 && price != null ? Number((price / eps).toFixed(1)) : null,
+                };
+              }),
             )}
           </div>
         </div>
